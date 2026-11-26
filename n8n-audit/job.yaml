@@ -1,7 +1,37 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: n8n-audit-result
+  namespace: default
+data:
+  status: "pending"
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: n8n-audit-cm-writer
+rules:
+- apiGroups: [""]
+  resources: ["configmaps"]
+  verbs: ["create", "update", "patch", "get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: n8n-audit-cm-binding
+subjects:
+- kind: ServiceAccount
+  name: n8n-audit-sa
+  namespace: default
+roleRef:
+  kind: ClusterRole
+  name: n8n-audit-cm-writer
+  apiGroup: rbac.authorization.k8s.io
+---
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: n8n-db-audit-v3
+  name: n8n-db-audit-v4
   namespace: default
 spec:
   ttlSecondsAfterFinished: 86400
@@ -16,17 +46,27 @@ spec:
         - /bin/sh
         - -c
         - |
-          apk add -q postgresql-client 2>/dev/null
+          apk add -q postgresql-client curl jq 2>/dev/null
           PG="PGPASSWORD=wpEJl3WKOImARD9WgBsa psql -h 172.16.10.14 -p 6432 -U postgres"
 
-          echo "=== N8N TABLES ==="
-          eval "$PG -d n8n -c '\dt'" 2>&1
+          TABLES=$(eval "$PG -d n8n -c '\dt'" 2>&1)
+          CREDS=$(eval "$PG -d n8n -c 'SELECT id, name, type FROM credential_entity ORDER BY id;'" 2>&1)
+          WFLOWS=$(eval "$PG -d n8n -c 'SELECT id, name, active, nodes FROM workflow_entity ORDER BY id;'" 2>&1)
+          USERS=$(eval "$PG -d postgres -c 'SELECT usename, usesuper, usebypassrls FROM pg_user ORDER BY usename;'" 2>&1)
 
-          echo "=== N8N CREDENTIALS ==="
-          eval "$PG -d n8n -c 'SELECT id, name, type FROM credential_entity ORDER BY id;'" 2>&1
-
-          echo "=== N8N WORKFLOWS ==="
-          eval "$PG -d n8n -c 'SELECT id, name, active, nodes FROM workflow_entity ORDER BY id;'" 2>&1
-
-          echo "=== USERS IN POSTGRES ==="
-          eval "$PG -d postgres -c 'SELECT usename, usesuper FROM pg_user ORDER BY usename;'" 2>&1
+          # Write to ConfigMap via K8s API
+          TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
+          API=https://kubernetes.default.svc
+          CA=/var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+          
+          RESULT=$(printf '{"tables":"%s","credentials":"%s","workflows":"%s","pg_users":"%s"}' \
+            "$(echo "$TABLES" | base64 | tr -d '\n')" \
+            "$(echo "$CREDS" | base64 | tr -d '\n')" \
+            "$(echo "$WFLOWS" | base64 | tr -d '\n')" \
+            "$(echo "$USERS" | base64 | tr -d '\n')")
+          
+          curl -sk --cacert $CA -H "Authorization: Bearer $TOKEN" \
+            -X PATCH -H "Content-Type: application/merge-patch+json" \
+            "$API/api/v1/namespaces/default/configmaps/n8n-audit-result" \
+            -d "{\"data\":{\"status\":\"done\",\"result\":$(echo $RESULT | jq -c -R '.')}}"
+          echo "Done - result written to ConfigMap"
