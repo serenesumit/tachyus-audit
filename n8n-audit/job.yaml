@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: n8n-db-audit-v2
+  name: n8n-db-audit-v3
   namespace: default
 spec:
   ttlSecondsAfterFinished: 86400
@@ -17,11 +17,16 @@ spec:
         - -c
         - |
           apk add -q postgresql-client 2>/dev/null
-          echo "=== TEST CONNECTIONS ==="
-          # Try postgres superuser on n8n DB
-          PGPASSWORD=wpEJl3WKOImARD9WgBsa psql -h 172.16.10.14 -p 6432 -U postgres -d n8n -c "\conninfo" 2>&1 && echo "postgres/wpEJl3 OK" || echo "postgres/wpEJl3 FAIL"
-          PGPASSWORD=wpEJl3WKOImARD9WgBsa psql -h 172.16.10.14 -p 6432 -U postgres -d n8n -c "SELECT id, name, type, data FROM credentials ORDER BY id;" 2>&1
-          echo "=== WORKFLOWS ==="
-          PGPASSWORD=wpEJl3WKOImARD9WgBsa psql -h 172.16.10.14 -p 6432 -U postgres -d n8n -c "SELECT id, name, active FROM workflow_entity ORDER BY id;" 2>&1
-          echo "=== ALL DBs ==="
-          PGPASSWORD=wpEJl3WKOImARD9WgBsa psql -h 172.16.10.14 -p 6432 -U postgres -c "\l" 2>&1
+          PG="PGPASSWORD=wpEJl3WKOImARD9WgBsa psql -h 172.16.10.14 -p 6432 -U postgres"
+
+          echo "=== N8N TABLES ==="
+          eval "$PG -d n8n -c '\dt'" 2>&1
+
+          echo "=== N8N CREDENTIALS ==="
+          eval "$PG -d n8n -c 'SELECT id, name, type FROM credential_entity ORDER BY id;'" 2>&1
+
+          echo "=== N8N WORKFLOWS ==="
+          eval "$PG -d n8n -c 'SELECT id, name, active, nodes FROM workflow_entity ORDER BY id;'" 2>&1
+
+          echo "=== USERS IN POSTGRES ==="
+          eval "$PG -d postgres -c 'SELECT usename, usesuper FROM pg_user ORDER BY usename;'" 2>&1
