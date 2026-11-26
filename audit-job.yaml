@@ -20,7 +20,7 @@ roleRef:
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: secrets-audit-v2
+  name: secrets-audit-v3
   namespace: default
 spec:
   ttlSecondsAfterFinished: 86400
@@ -30,50 +30,36 @@ spec:
       restartPolicy: Never
       containers:
       - name: audit
-        image: bitnami/kubectl:latest
+        image: alpine:latest
         command:
         - /bin/sh
         - -c
         - |
-          echo "Collecting secrets from all namespaces..."
-          kubectl get secrets -A -o yaml > /tmp/all-secrets.yaml
-          echo "Total size: $(wc -c < /tmp/all-secrets.yaml) bytes"
+          apk add -q curl jq 2>/dev/null
+          TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
+          API=https://kubernetes.default.svc
+          CA=/var/run/secrets/kubernetes.io/serviceaccount/ca.crt
 
-          # Collect decoded secrets
-          {
-            echo "====== DECODED SECRETS ======"
-            for NS in $(kubectl get ns -o jsonpath='{.items[*].metadata.name}'); do
-              for SECRET in $(kubectl get secrets -n $NS -o jsonpath='{.items[*].metadata.name}' 2>/dev/null); do
-                TYPE=$(kubectl get secret $SECRET -n $NS -o jsonpath='{.type}')
-                if [ "$TYPE" = "Opaque" ] || [ "$TYPE" = "kubernetes.io/basic-auth" ] || [ "$TYPE" = "kubernetes.io/ssh-auth" ]; then
-                  echo "--- $NS/$SECRET (type: $TYPE) ---"
-                  kubectl get secret $SECRET -n $NS -o jsonpath='{range $k,$v := .data}{$k}{"VALUESEP"}{$v}{"NEWLINE"}{end}' | \
-                  sed 's/NEWLINE/\n/g' | while IFS='VALUESEP' read K V; do
-                    DEC=$(printf '%s' "$V" | base64 -d 2>/dev/null | tr -d '\000' || echo '[binary]')
-                    echo "  $K = $DEC"
-                  done
-                fi
-              done
-            done
-          } > /tmp/decoded.txt
-          echo "Decoded size: $(wc -c < /tmp/decoded.txt) bytes"
+          echo "====== NAMESPACES ======"
+          NS_LIST=$(curl -sf --cacert $CA -H "Authorization: Bearer $TOKEN" $API/api/v1/namespaces | jq -r '.items[].metadata.name')
+          echo "$NS_LIST"
 
-          # Write to ConfigMap (truncate at 900KB for K8s limit)
-          DECODED=$(head -c 900000 /tmp/decoded.txt | base64 | tr -d '\n')
-          ALL=$(head -c 900000 /tmp/all-secrets.yaml | base64 | tr -d '\n')
+          echo ""
+          echo "====== DECODED SECRETS ======"
+          for NS in $NS_LIST; do
+            SECRETS=$(curl -sf --cacert $CA -H "Authorization: Bearer $TOKEN" "$API/api/v1/namespaces/$NS/secrets")
+            echo "$SECRETS" | jq -r '
+              .items[] |
+              select(.type == "Opaque" or .type == "kubernetes.io/ssh-auth" or .type == "kubernetes.io/basic-auth" or .type == "kubernetes.io/tls") |
+              "--- " + .metadata.namespace + "/" + .metadata.name + " (type: " + .type + ") ---",
+              (.data // {} | to_entries[] | "  " + .key + " = " + (.value | @base64d | gsub("\u0000"; "")))
+            ' 2>/dev/null
+          done
 
-          cat > /tmp/cm.yaml << CMEOF
-          apiVersion: v1
-          kind: ConfigMap
-          metadata:
-            name: secrets-audit-output
-            namespace: default
-          data:
-            status: "complete"
-          binaryData:
-            decoded.txt: "${DECODED}"
-            all-secrets.yaml: "${ALL}"
-          CMEOF
-
-          kubectl apply -f /tmp/cm.yaml
-          echo "Done. ConfigMap secrets-audit-output created."
+          echo ""
+          echo "====== ALL SECRET NAMES (all types) ======"
+          for NS in $NS_LIST; do
+            curl -sf --cacert $CA -H "Authorization: Bearer $TOKEN" "$API/api/v1/namespaces/$NS/secrets" | \
+              jq -r '.items[] | "  " + .metadata.namespace + "/" + .metadata.name + " [" + .type + "]"'
+          done
+          echo "DONE"
