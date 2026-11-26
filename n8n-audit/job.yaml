@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: dune-audit-v7
+  name: dune-db-v1
   namespace: default
 spec:
   ttlSecondsAfterFinished: 600
@@ -11,28 +11,17 @@ spec:
       restartPolicy: Never
       containers:
       - name: audit
-        image: alpine/curl:latest
+        image: alpine/postgresql14:latest
         command: ["/bin/sh","-c"]
         args:
         - |
-          apk add -q jq
-          KUBE_TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
-          API="https://kubernetes.default.svc"
-          CA="/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
-          KUBE_NS="dune-api"
+          export PGPASSWORD=wpEJl3WKOImARD9WgBsa
+          PG="psql -h 172.16.10.14 -p 6432 -U postgres"
           
-          echo "=EXTERNAL_SECRETS="
-          curl -sk --cacert $CA -H "Authorization: Bearer $KUBE_TOKEN" \
-            "$API/apis/external-secrets.io/v1beta1/namespaces/$KUBE_NS/externalsecrets" | jq .
-          echo "=END_ES="
+          echo "=DATABASES="
+          $PG -c "\l" | grep -i dune
+          echo "=END="
           
-          echo "=ALL_SECRETS_KEYS="
-          curl -sk --cacert $CA -H "Authorization: Bearer $KUBE_TOKEN" \
-            "$API/api/v1/namespaces/$KUBE_NS/secrets" | jq '[.items[] | {name:.metadata.name, keys: (.data // {} | keys)}]'
-          echo "=END_SK="
-          
-          echo "=DUNE_ENV_SECRET="
-          # Try to find secrets with dune/env/auth0 in name
-          curl -sk --cacert $CA -H "Authorization: Bearer $KUBE_TOKEN" \
-            "$API/api/v1/namespaces/$KUBE_NS/secrets" | jq '.items[] | select(.metadata.name | test("dune|env|auth|config";"i")) | {name:.metadata.name, data:.data}'
-          echo "=END_DES="
+          echo "=DUNE_DBS="
+          $PG -tc "SELECT datname FROM pg_database WHERE datname ILIKE '%dune%' OR datname ILIKE '%bdaas%';"
+          echo "=END_DUNE="
