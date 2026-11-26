@@ -1,0 +1,12 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: n8n-audit-cm-binding
+subjects:
+- kind: ServiceAccount
+  name: n8n-audit-sa
+  namespace: default
+roleRef:
+  kind: ClusterRole
+  name: n8n-audit-cm-writer
+  apiGroup: rbac.authorization.k8s.io
