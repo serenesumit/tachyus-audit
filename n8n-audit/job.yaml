@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: dune-db-v20
+  name: dune-db-v21
   namespace: default
 spec:
   ttlSecondsAfterFinished: 600
@@ -15,34 +15,58 @@ spec:
         command: ["/bin/sh","-c"]
         args:
         - |
-          echo "=POSTGRES_SECRET="
-          kubectl get secret postgres-connection-secrets -n default -o jsonpath='{.data}' | tr ',' '\n'
+          POD=$(kubectl get pods -n dune-api -o jsonpath='{.items[0].metadata.name}')
+          echo "Pod: $POD"
           
-          echo ""
-          echo "=POSTGRES_SECRET_DECODED="
-          kubectl get secret postgres-connection-secrets -n default -o go-template='{{range $k,$v := .data}}{{$k}}={{$v | base64decode}}{{"\n"}}{{end}}'
+          echo "=APP_STRUCTURE="
+          kubectl exec -n dune-api $POD -- find /code -name "*.py" -path "*/auth*" 2>&1 | head -20
+          kubectl exec -n dune-api $POD -- find /code -name "security.py" -o -name "auth.py" -o -name "token.py" 2>&1 | head -10
           
-          echo "=FORGE_JWT_TEST="
-          # Forge JWT using openssl HMAC-SHA256 from Linux
-          SECRET="b9e2881d706461152371f6389962817a70c3e69dfc70166c53227c99a2711cc6"
+          echo "=CREATE_TOKEN_FROM_APP="
+          kubectl exec -n dune-api $POD -- python3 -c "
+import sys
+sys.path.insert(0, '/code')
+import os
+os.chdir('/code')
+
+# Try to create a token using jose
+from jose import jwt
+import time
+secret = 'b9e2881d706461152371f6389962817a70c3e69dfc70166c53227c99a2711cc6'
+exp = int(time.time()) + 86400*365*10
+
+# Try different sub formats
+for sub in ['admin@tachyus.com', 'admin', '1', 1]:
+    token = jwt.encode({'sub': str(sub), 'exp': exp}, secret, algorithm='HS256')
+    print(f'sub={sub}: {token}')
+print('DONE')
+" 2>&1
           
-          # Different JWT payloads to test
-          for PAYLOAD in \
-            '{"sub":"admin@tachyus.com","exp":9999999999}' \
-            '{"sub":"admin","exp":9999999999}' \
-            '{"sub":"admin@tachyus.com","exp":9999999999,"type":"access"}' \
-            '{"sub":"admin@tachyus.com","exp":9999999999,"username":"admin"}'; do
-            
-            H=$(printf '{"alg":"HS256","typ":"JWT"}' | openssl base64 -A | tr -d '=' | tr '+/' '-_')
-            P=$(printf '%s' "$PAYLOAD" | openssl base64 -A | tr -d '=' | tr '+/' '-_')
-            SIG=$(printf '%s.%s' "$H" "$P" | openssl dgst -sha256 -hmac "$SECRET" -binary | openssl base64 -A | tr -d '=' | tr '+/' '-_')
-            JWT="${H}.${P}.${SIG}"
-            
-            echo "Testing payload: $PAYLOAD"
-            RESULT=$(curl -sk -X GET "http://dune-api.dune-api.svc.cluster.local:3000/v1/users/me" \
-              -H "Authorization: Bearer $JWT")
-            echo "Result: $RESULT"
-            echo "---"
-          done
+          echo "=CHECK_TOKEN_ENDPOINT="
+          # Use app's internal create_access_token function
+          kubectl exec -n dune-api $POD -- python3 -c "
+import sys
+sys.path.insert(0, '/code')
+import os
+os.chdir('/code')
+
+# Find and use the create_access_token function
+try:
+    from app.core.security import create_access_token
+    token = create_access_token({'sub': 'admin@tachyus.com'})
+    print('APP_TOKEN=' + token)
+except Exception as e:
+    print('ERROR_security:', e)
+
+try:
+    from app.api.auth.jwt import create_access_token
+    token = create_access_token({'sub': 'admin@tachyus.com'})
+    print('AUTH_TOKEN=' + token)
+except Exception as e:
+    print('ERROR_jwt:', e)
+" 2>&1
+          
+          echo "=FIND_AUTH_MODULE="
+          kubectl exec -n dune-api $POD -- grep -r "create_access_token\|SECRET_KEY\|def create" /code --include="*.py" -l 2>&1 | head -20
           
           sleep 60
