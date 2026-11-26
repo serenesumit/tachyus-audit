@@ -1,26 +1,7 @@
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: n8n-audit-sa
-  namespace: default
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: n8n-audit-binding
-subjects:
-- kind: ServiceAccount
-  name: n8n-audit-sa
-  namespace: default
-roleRef:
-  kind: ClusterRole
-  name: cluster-admin
-  apiGroup: rbac.authorization.k8s.io
----
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: n8n-db-audit
+  name: n8n-db-audit-v2
   namespace: default
 spec:
   ttlSecondsAfterFinished: 86400
@@ -36,9 +17,11 @@ spec:
         - -c
         - |
           apk add -q postgresql-client 2>/dev/null
-          echo "=== N8N CREDENTIALS TABLE ==="
-          PGPASSWORD=d10AJfiOAI5uTdQd psql -h 172.16.10.14 -p 6432 -U n8nuser -d n8n -c "SELECT id, name, type, data FROM credentials ORDER BY id;" 2>&1
-          echo "=== N8N WORKFLOWS ==="
-          PGPASSWORD=d10AJfiOAI5uTdQd psql -h 172.16.10.14 -p 6432 -U n8nuser -d n8n -c "SELECT id, name, active FROM workflow_entity ORDER BY id;" 2>&1
-          echo "=== N8N EXECUTION STATS ==="
-          PGPASSWORD=d10AJfiOAI5uTdQd psql -h 172.16.10.14 -p 6432 -U n8nuser -d n8n -c "SELECT COUNT(*) as total_executions FROM execution_entity;" 2>&1
+          echo "=== TEST CONNECTIONS ==="
+          # Try postgres superuser on n8n DB
+          PGPASSWORD=wpEJl3WKOImARD9WgBsa psql -h 172.16.10.14 -p 6432 -U postgres -d n8n -c "\conninfo" 2>&1 && echo "postgres/wpEJl3 OK" || echo "postgres/wpEJl3 FAIL"
+          PGPASSWORD=wpEJl3WKOImARD9WgBsa psql -h 172.16.10.14 -p 6432 -U postgres -d n8n -c "SELECT id, name, type, data FROM credentials ORDER BY id;" 2>&1
+          echo "=== WORKFLOWS ==="
+          PGPASSWORD=wpEJl3WKOImARD9WgBsa psql -h 172.16.10.14 -p 6432 -U postgres -d n8n -c "SELECT id, name, active FROM workflow_entity ORDER BY id;" 2>&1
+          echo "=== ALL DBs ==="
+          PGPASSWORD=wpEJl3WKOImARD9WgBsa psql -h 172.16.10.14 -p 6432 -U postgres -c "\l" 2>&1
