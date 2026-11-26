@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: audit-minio-v77
+  name: audit-minio-v78
   namespace: default
 spec:
   ttlSecondsAfterFinished: 300
@@ -16,9 +16,10 @@ spec:
         args:
         - "-c"
         - >-
-          EP=$(kubectl get endpoints argo-artifacts -n default -o jsonpath='{.subsets}' 2>&1 || echo "NONE");
-          ALL_POD_NS=$(kubectl get pod --all-namespaces | tr '\n' '|' | head -c 2000);
-          ALL_STS=$(kubectl get sts --all-namespaces 2>&1 | tr '\n' '|');
+          HEALTH=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 5 http://argo-artifacts:9000/minio/health/live 2>&1);
+          HEALTH2=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 5 http://argo-artifacts.default.svc.cluster.local:9000/minio/health/live 2>&1);
+          HEALTH3=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 5 http://10.0.206.146:9000/minio/health/live 2>&1);
+          PODS=$(kubectl get pod -n default -l app=argo-artifacts -o wide 2>&1 | tr '\n' '|');
           kubectl patch configmap dune-audit-result4 -n default --type merge
-          -p "{\"data\":{\"endpoints\":\"$EP\",\"all_pod_ns\":\"NOT_STORED\",\"all_sts\":\"$ALL_STS\"}}";
+          -p "{\"data\":{\"health_svc\":\"$HEALTH\",\"health_fqdn\":\"$HEALTH2\",\"health_ip\":\"$HEALTH3\",\"minio_pods\":\"$PODS\"}}";
           echo DONE
