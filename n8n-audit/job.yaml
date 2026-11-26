@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: dune-db-v1
+  name: dune-db-v2
   namespace: default
 spec:
   ttlSecondsAfterFinished: 600
@@ -11,17 +11,18 @@ spec:
       restartPolicy: Never
       containers:
       - name: audit
-        image: alpine/postgresql14:latest
+        image: alpine/curl:latest
         command: ["/bin/sh","-c"]
         args:
         - |
+          apk add -q postgresql-client jq
           export PGPASSWORD=wpEJl3WKOImARD9WgBsa
           PG="psql -h 172.16.10.14 -p 6432 -U postgres"
           
-          echo "=DATABASES="
-          $PG -c "\l" | grep -i dune
-          echo "=END="
-          
           echo "=DUNE_DBS="
           $PG -tc "SELECT datname FROM pg_database WHERE datname ILIKE '%dune%' OR datname ILIKE '%bdaas%';"
-          echo "=END_DUNE="
+          echo "=END="
+          
+          echo "=ALL_DBS="
+          $PG -tc "SELECT datname FROM pg_database ORDER BY datname;"
+          echo "=END_ALL="
