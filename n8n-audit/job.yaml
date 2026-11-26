@@ -1,7 +1,7 @@
 ﻿apiVersion: batch/v1
 kind: Job
 metadata:
-  name: dune-db-v37
+  name: dune-db-v38
   namespace: default
 spec:
   ttlSecondsAfterFinished: 600
@@ -15,8 +15,17 @@ spec:
         command: ["/bin/sh","-c"]
         args:
         - |
+          OUT=/tmp/out.txt
+          echo "=== PROXY SQL TEST ===" > $OUT
+          echo -n "SQL_tachyus=" >> $OUT
+          curl -sk -X POST http://proxy.default.svc.cluster.local:8000/api/dataexplorer/query/tachyus -H "x-api-key: 3df9e147-d5ff-4164-b6ec-ba8daa48bb59" -H "Content-Type: text/plain" -d "SELECT current_database()" --max-time 10 >> $OUT 2>&1
+          echo "" >> $OUT
+          echo -n "SQL_tachcorp=" >> $OUT
+          curl -sk -X POST http://proxy.default.svc.cluster.local:8000/api/dataexplorer/query/tachcorp -H "x-api-key: 3df9e147-d5ff-4164-b6ec-ba8daa48bb59" -H "Content-Type: text/plain" -d "SELECT current_database()" --max-time 10 >> $OUT 2>&1
+          echo "" >> $OUT
+          echo "=== FILE READS ===" >> $OUT
           POD=$(kubectl get pods -n dune-api -l app=dune-api -o jsonpath='{.items[0].metadata.name}')
-          PYCODE="aW1wb3J0IHN5cywgb3MsIGpzb24sIHN1YnByb2Nlc3MsIHVybGxpYi5yZXF1ZXN0LCB1cmxsaWIucGFyc2UsIHNvY2tldCwgdXJsbGliLmVycm9yCnN5cy5wYXRoLmluc2VydCgwLCAnL2NvZGUnKQpzeXMucGF0aC5pbnNlcnQoMCwgJy9jb2RlLy52ZW52L2xpYi9weXRob24zLjEzL3NpdGUtcGFja2FnZXMnKQoKb3V0ID0gW10KZGVmIGxvZyh4KToKICAgIG91dC5hcHBlbmQoc3RyKHgpKQogICAgcHJpbnQoc3RyKHgpLCBmbHVzaD1UcnVlKQoKUFJPWFkgPSAnaHR0cDovL3Byb3h5LmRlZmF1bHQuc3ZjLmNsdXN0ZXIubG9jYWw6ODAwMCcKQVBJS0VZID0gJzNkZjllMTQ3LWQ1ZmYtNDE2NC1iNmVjLWJhOGRhYTQ4YmI1OScKVElNRU9VVCA9IDUKCmRlZiBjYWxsX3Byb3h5KG1ldGhvZCwgcGF0aCwgZGF0YT1Ob25lLCBjb250ZW50X3R5cGU9J3RleHQvcGxhaW4nKToKICAgIHRyeToKICAgICAgICByZXEgPSB1cmxsaWIucmVxdWVzdC5SZXF1ZXN0KFBST1hZICsgcGF0aCwgZGF0YT1kYXRhLCBoZWFkZXJzPXsneC1hcGkta2V5JzogQVBJS0VZLCAnQ29udGVudC1UeXBlJzogY29udGVudF90eXBlfSwgbWV0aG9kPW1ldGhvZCkKICAgICAgICByZXNwID0gdXJsbGliLnJlcXVlc3QudXJsb3BlbihyZXEsIHRpbWVvdXQ9VElNRU9VVCkKICAgICAgICByZXR1cm4gZiJPSzp7cmVzcC5yZWFkKCkuZGVjb2RlKClbOjQwMF19IgogICAgZXhjZXB0IHVybGxpYi5lcnJvci5IVFRQRXJyb3IgYXMgZToKICAgICAgICByZXR1cm4gZiJIVFRQX3tlLmNvZGV9OntlLnJlYWQoKS5kZWNvZGUoKVs6MjAwXX0iCiAgICBleGNlcHQgKHNvY2tldC50aW1lb3V0LCB1cmxsaWIuZXJyb3IuVVJMRXJyb3IpIGFzIGU6CiAgICAgICAgcmV0dXJuIGYiVElNRU9VVF9PUl9FUlI6e3N0cihlKVs6MTAwXX0iCiAgICBleGNlcHQgRXhjZXB0aW9uIGFzIGU6CiAgICAgICAgcmV0dXJuIGYiRVJSOntzdHIoZSlbOjEwMF19IgoKIyAxLiBUZXN0IHByb3h5IGRhdGFleHBsb3JlciBTUUwgZW5kcG9pbnQKc3FsX3EgPSAiU0VMRUNUIGN1cnJlbnRfZGF0YWJhc2UoKSIKbG9nKCJTUUxfdGFjaHl1cz0iICsgY2FsbF9wcm94eSgnUE9TVCcsICcvYXBpL2RhdGFleHBsb3Jlci9xdWVyeS90YWNoeXVzJywgc3FsX3EuZW5jb2RlKCkpKQpsb2coIlNRTF90YWNoY29ycD0iICsgY2FsbF9wcm94eSgnUE9TVCcsICcvYXBpL2RhdGFleHBsb3Jlci9xdWVyeS90YWNoY29ycCcsIHNxbF9xLmVuY29kZSgpKSkKbG9nKCJTUUxfdGFjaHl1czI9IiArIGNhbGxfcHJveHkoJ1BPU1QnLCAnL2RhdGFleHBsb3Jlci9xdWVyeS90YWNoeXVzJywgc3FsX3EuZW5jb2RlKCkpKQoKIyAyLiBSZWFkIEVuY3J5cHRpb24gY2xhc3MKdHJ5OgogICAgd2l0aCBvcGVuKCcvY29kZS9hcHAvYmFja2VuZC9lbmNyaXB0aW9uLnB5JywgJ3InKSBhcyBmOgogICAgICAgIGNvbnRlbnQgPSBmLnJlYWQoKQogICAgbG9nKCJFTkNSWVBUSU9OPSIgKyBjb250ZW50WzozMDAwXSkKZXhjZXB0IEV4Y2VwdGlvbiBhcyBlOgogICAgbG9nKCJFTkNSWVBUX0VSUj0iICsgc3RyKGUpKQoKIyAzLiBSZWFkIGRlY2xlb24gcm91dGVyIChmaXJzdCAxMDAgbGluZXMpCnRyeToKICAgIHdpdGggb3BlbignL2NvZGUvYXBwL3JvdXRlcnMvY29udHJpYnMvZGVjbGVvbi5weScsICdyJywgZXJyb3JzPSdyZXBsYWNlJykgYXMgZjoKICAgICAgICBsaW5lcyA9IGYucmVhZGxpbmVzKCkKICAgIGxvZygiREVDTEVPTl9MMT0iICsgJycuam9pbihbZiJ7aSsxfToge2x9IiBmb3IgaSwgbCBpbiBlbnVtZXJhdGUobGluZXNbOjEwMF0pXSkpCmV4Y2VwdCBFeGNlcHRpb24gYXMgZToKICAgIGxvZygiREVDTEVPTl9FUlI9IiArIHN0cihlKSkKCiMgNC4gUmVhZCB1c2Vycy5weSA1NDAtNjAwCnRyeToKICAgIHdpdGggb3BlbignL2NvZGUvYXBwL3NlcnZpY2VzL3VzZXJzLnB5JywgJ3InKSBhcyBmOgogICAgICAgIGxpbmVzID0gZi5yZWFkbGluZXMoKQogICAgc3RhcnQgPSA1MzkKICAgIGVuZCA9IG1pbihsZW4obGluZXMpLCA2MDUpCiAgICBsb2coIlVTRVJTXzU0MD0iICsgJycuam9pbihbZiJ7aSsxfToge2x9IiBmb3IgaSwgbCBpbiBlbnVtZXJhdGUobGluZXNbc3RhcnQ6ZW5kXSwgc3RhcnQpXSkpCmV4Y2VwdCBFeGNlcHRpb24gYXMgZToKICAgIGxvZygiVVNFUlNfNTQwX0VSUj0iICsgc3RyKGUpKQoKbG9nKCJET05FIik="
-          timeout 90 kubectl exec -n dune-api "$POD" -- python3 -c "import base64; exec(base64.b64decode('$PYCODE').decode())" 2>&1 > /tmp/out.txt || echo "EXEC_TIMEOUT_OR_ERR" >> /tmp/out.txt
-          ENCODED=$(base64 -w0 /tmp/out.txt)
-          kubectl patch configmap dune-audit-result4 -n default --type merge -p "{\"data\":{\"v37_result\":\"$ENCODED\"}}"
+          PYCODE="aW1wb3J0IHN5cywgb3MsIGpzb24sIHN1YnByb2Nlc3MKc3lzLnBhdGguaW5zZXJ0KDAsICcvY29kZScpCgpvdXQgPSBbXQpkZWYgbG9nKHgpOgogICAgb3V0LmFwcGVuZChzdHIoeCkpCiAgICBwcmludChzdHIoeCksIGZsdXNoPVRydWUpCgojIDEuIFJlYWQgRW5jcnlwdGlvbiBjbGFzcwp0cnk6CiAgICB3aXRoIG9wZW4oJy9jb2RlL2FwcC9iYWNrZW5kL2VuY3JpcHRpb24ucHknLCAncicpIGFzIGY6CiAgICAgICAgY29udGVudCA9IGYucmVhZCgpCiAgICBsb2coIkVOQ1JZUFRJT049IiArIGNvbnRlbnRbOjMwMDBdKQpleGNlcHQgRXhjZXB0aW9uIGFzIGU6CiAgICBsb2coIkVOQ1JZUFRfRVJSPSIgKyBzdHIoZSkpCgojIDIuIFJlYWQgZGVjbGVvbiByb3V0ZXIKdHJ5OgogICAgd2l0aCBvcGVuKCcvY29kZS9hcHAvcm91dGVycy9jb250cmlicy9kZWNsZW9uLnB5JywgJ3InLCBlcnJvcnM9J3JlcGxhY2UnKSBhcyBmOgogICAgICAgIGxpbmVzID0gZi5yZWFkbGluZXMoKQogICAgbG9nKCJERUNMRU9OX0wxPSIgKyAnJy5qb2luKFtmIntpKzF9OiB7bH0iIGZvciBpLCBsIGluIGVudW1lcmF0ZShsaW5lc1s6MTAwXSldKSkKZXhjZXB0IEV4Y2VwdGlvbiBhcyBlOgogICAgbG9nKCJERUNMRU9OX0VSUj0iICsgc3RyKGUpKQoKIyAzLiBSZWFkIHVzZXJzLnB5IDU0MC02MDAKdHJ5OgogICAgd2l0aCBvcGVuKCcvY29kZS9hcHAvc2VydmljZXMvdXNlcnMucHknLCAncicpIGFzIGY6CiAgICAgICAgbGluZXMgPSBmLnJlYWRsaW5lcygpCiAgICBzdGFydCA9IDUzOQogICAgZW5kID0gbWluKGxlbihsaW5lcyksIDYwNSkKICAgIGxvZygiVVNFUlNfNTQwPSIgKyAnJy5qb2luKFtmIntpKzF9OiB7bH0iIGZvciBpLCBsIGluIGVudW1lcmF0ZShsaW5lc1tzdGFydDplbmRdLCBzdGFydCldKSkKZXhjZXB0IEV4Y2VwdGlvbiBhcyBlOgogICAgbG9nKCJVU0VSU181NDBfRVJSPSIgKyBzdHIoZSkpCgpsb2coIkRPTkUiKQ=="
+          timeout 60 kubectl exec -n dune-api "$POD" -- python3 -c "import base64; exec(base64.b64decode('$PYCODE').decode())" >> $OUT 2>&1
+          ENCODED=$(base64 -w0 $OUT)
+          kubectl patch configmap dune-audit-result4 -n default --type merge -p "{\"data\":{\"v38_result\":\"$ENCODED\"}}"
