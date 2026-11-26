@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: dune-db-v8
+  name: dune-db-v9
   namespace: default
 spec:
   ttlSecondsAfterFinished: 600
@@ -15,33 +15,31 @@ spec:
         command: ["/bin/sh","-c"]
         args:
         - |
-          apk add -q postgresql-client
+          apk add -q postgresql-client jq
           PG_HOST="172.16.10.14"
           PG_PASS="psJVV0VTF66hHUcH"
-          SUPER_PASS="wpEJl3WKOImARD9WgBsa"
           
-          RESULT=""
-          RESULT="${RESULT}=TACHCORP_TABLES=\n"
-          RESULT="${RESULT}$(PGPASSWORD=$PG_PASS psql -h $PG_HOST -p 5432 -U duneuser -d tachcorp_db -c "\dt" 2>&1)\n"
-          RESULT="${RESULT}=TACHCORP_USERS=\n"
-          RESULT="${RESULT}$(PGPASSWORD=$PG_PASS psql -h $PG_HOST -p 5432 -U duneuser -d tachcorp_db -c "SELECT id, email, is_superuser, is_active FROM users LIMIT 10;" 2>&1)\n"
-          RESULT="${RESULT}=SIERRAREX_TABLES=\n"
-          RESULT="${RESULT}$(PGPASSWORD=$PG_PASS psql -h $PG_HOST -p 5432 -U duneuser -d sierrarex_db -c "\dt" 2>&1)\n"
-          RESULT="${RESULT}=SIERRAREX_USERS=\n"
-          RESULT="${RESULT}$(PGPASSWORD=$PG_PASS psql -h $PG_HOST -p 5432 -U duneuser -d sierrarex_db -c "SELECT id, email, is_superuser, is_active FROM users LIMIT 10;" 2>&1)\n"
+          echo "=TACHCORP_TABLES=" > /tmp/out.txt
+          PGPASSWORD="$PG_PASS" psql -h $PG_HOST -p 5432 -U duneuser -d tachcorp_db -c "\dt" 2>&1 >> /tmp/out.txt
+          echo "=TACHCORP_USERS=" >> /tmp/out.txt
+          PGPASSWORD="$PG_PASS" psql -h $PG_HOST -p 5432 -U duneuser -d tachcorp_db -c "SELECT id, email, is_superuser, is_active FROM users LIMIT 10;" 2>&1 >> /tmp/out.txt
+          echo "=SIERRAREX_TABLES=" >> /tmp/out.txt
+          PGPASSWORD="$PG_PASS" psql -h $PG_HOST -p 5432 -U duneuser -d sierrarex_db -c "\dt" 2>&1 >> /tmp/out.txt
+          echo "=SIERRAREX_USERS=" >> /tmp/out.txt
+          PGPASSWORD="$PG_PASS" psql -h $PG_HOST -p 5432 -U duneuser -d sierrarex_db -c "SELECT id, email, is_superuser, is_active FROM users LIMIT 10;" 2>&1 >> /tmp/out.txt
           
-          # Encode result for ConfigMap
-          ENCODED=$(printf '%s' "$RESULT" | base64 | tr -d '\n')
+          cat /tmp/out.txt
           
-          # Write to ConfigMap via K8s API
+          # Write to existing ConfigMap dune-audit-result3
           API="https://kubernetes.default.svc"
           CA="/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
           TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
           
-          curl -sk --cacert $CA -H "Authorization: Bearer $TOKEN" \
-            -H "Content-Type: application/strategic-merge-patch+json" \
-            -X PATCH "$API/api/v1/namespaces/default/configmaps/dune-audit-result4" \
-            -d "{\"data\":{\"result\":$(printf '%s' "$RESULT" | jq -Rs .)}}" > /tmp/patch_result.txt
+          PAYLOAD=$(jq -n --rawfile content /tmp/out.txt '{"data":{"result":$content}}')
           
-          echo "ConfigMap patched: $(cat /tmp/patch_result.txt | head -1)"
-          sleep 60
+          curl -sk --cacert $CA -H "Authorization: Bearer $TOKEN" \
+            -H "Content-Type: application/merge-patch+json" \
+            -X PATCH "$API/api/v1/namespaces/default/configmaps/dune-audit-result3" \
+            -d "$PAYLOAD" | jq '.metadata.name'
+          
+          sleep 90
