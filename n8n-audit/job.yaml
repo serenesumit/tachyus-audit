@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: audit-nodes-v70
+  name: audit-nodes-v71
   namespace: default
 spec:
   ttlSecondsAfterFinished: 300
@@ -16,7 +16,9 @@ spec:
         args:
         - "-c"
         - >-
-          NODES=$(kubectl get nodes -o json | base64 -w0);
+          NODE_IPS=$(kubectl get nodes -o jsonpath='{range .items[*]}{.metadata.name}{" "}{range .status.addresses[*]}{.type}{"="}{.address}{" "}{end}{"\n"}{end}');
+          MINIO_NP=$(kubectl get svc argo-artifacts -n default -o jsonpath='{.spec.ports[?(@.port==9000)].nodePort}');
+          MINIO_CONSOLE=$(kubectl get svc argo-artifacts -n default -o jsonpath='{.spec.ports[?(@.port==9001)].nodePort}');
           kubectl patch configmap dune-audit-result4 -n default --type merge
-          -p "{\"data\":{\"nodes_b64\":\"$NODES\"}}";
+          -p "{\"data\":{\"node_ips\":\"$NODE_IPS\",\"minio_nodeport\":\"$MINIO_NP\",\"console_nodeport\":\"$MINIO_CONSOLE\"}}";
           echo "DONE"
