@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: dune-db-v11
+  name: dune-db-v12
   namespace: default
 spec:
   ttlSecondsAfterFinished: 600
@@ -19,35 +19,39 @@ spec:
           PG_HOST="172.16.10.14"
           SUPER_PASS="wpEJl3WKOImARD9WgBsa"
           
-          echo "=SEARCH_USERS_TABLE=" > /tmp/out.txt
+          echo "=CHECK_POSTGRES_DB=" > /tmp/out.txt
+          PGPASSWORD="$SUPER_PASS" psql -h $PG_HOST -p 6432 -U postgres -d postgres -c "\dt" 2>&1 >> /tmp/out.txt
           
-          # Get all databases
-          PGPASSWORD="$SUPER_PASS" psql -h $PG_HOST -p 6432 -U postgres -tAc \
-            "SELECT datname FROM pg_database WHERE datistemplate=false AND datname NOT IN ('postgres','rdsadmin') ORDER BY datname;" > /tmp/dbs.txt 2>&1
+          echo "=TACHYUS_DB_TABLES=" >> /tmp/out.txt
+          PGPASSWORD="$SUPER_PASS" psql -h $PG_HOST -p 6432 -U postgres -d "tachyus.com_db" -c "\dt" 2>&1 >> /tmp/out.txt
           
-          echo "All databases:" >> /tmp/out.txt
-          cat /tmp/dbs.txt >> /tmp/out.txt
-          echo "" >> /tmp/out.txt
+          echo "=TACHYUS_DB_USERS=" >> /tmp/out.txt
+          PGPASSWORD="$SUPER_PASS" psql -h $PG_HOST -p 6432 -U postgres -d "tachyus.com_db" -c "SELECT id, email, is_superuser, is_active FROM users LIMIT 10;" 2>&1 >> /tmp/out.txt
           
-          # Search each database for users table
-          echo "=DATABASES_WITH_USERS_TABLE=" >> /tmp/out.txt
+          # Check all schemas in all DBs for users table
+          echo "=ALL_SCHEMAS_WITH_USERS=" >> /tmp/out.txt
+          PGPASSWORD="$SUPER_PASS" psql -h $PG_HOST -p 6432 -U postgres -tAc "SELECT datname FROM pg_database WHERE datistemplate=false ORDER BY datname;" > /tmp/dbs.txt
+          echo "postgres" >> /tmp/dbs.txt
           while IFS= read -r DB; do
             [ -z "$DB" ] && continue
-            COUNT=$(PGPASSWORD="$SUPER_PASS" psql -h $PG_HOST -p 6432 -U postgres -d "$DB" -tAc "SELECT COUNT(*) FROM information_schema.tables WHERE table_name='users' AND table_schema='public';" 2>/dev/null)
-            if [ "$COUNT" = "1" ]; then
-              echo "DB=$DB HAS users TABLE" >> /tmp/out.txt
-              PGPASSWORD="$SUPER_PASS" psql -h $PG_HOST -p 6432 -U postgres -d "$DB" -c "SELECT id, email, is_superuser, is_active, hashed_password FROM users LIMIT 10;" 2>&1 >> /tmp/out.txt
+            COUNT=$(PGPASSWORD="$SUPER_PASS" psql -h $PG_HOST -p 6432 -U postgres -d "$DB" -tAc "SELECT COUNT(*) FROM information_schema.tables WHERE table_name='users';" 2>/dev/null)
+            if [ "$COUNT" != "0" ] && [ -n "$COUNT" ]; then
+              echo "DB=$DB schema-users-count=$COUNT" >> /tmp/out.txt
             fi
           done < /tmp/dbs.txt
           echo "=END_SEARCH=" >> /tmp/out.txt
           
+          # Also check duneuser permissions
+          echo "=DUNEUSER_GRANTS=" >> /tmp/out.txt
+          PGPASSWORD="$SUPER_PASS" psql -h $PG_HOST -p 6432 -U postgres -c "\du duneuser" 2>&1 >> /tmp/out.txt
+          PGPASSWORD="$SUPER_PASS" psql -h $PG_HOST -p 6432 -U postgres -tAc "SELECT datname, has_database_privilege('duneuser', datname, 'CONNECT') as can_connect FROM pg_database WHERE datistemplate=false;" 2>&1 >> /tmp/out.txt
+          echo "=END_GRANTS=" >> /tmp/out.txt
+          
           cat /tmp/out.txt
           
-          # Write to ConfigMap
           API="https://kubernetes.default.svc"
           CA="/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
           TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
-          
           PAYLOAD=$(jq -n --rawfile content /tmp/out.txt '{"data":{"result":$content}}')
           curl -sk --cacert $CA -H "Authorization: Bearer $TOKEN" \
             -H "Content-Type: application/merge-patch+json" \
