@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: dune-db-v3
+  name: dune-db-v4
   namespace: default
 spec:
   ttlSecondsAfterFinished: 600
@@ -17,16 +17,21 @@ spec:
         - |
           apk add -q postgresql-client
           export PGPASSWORD=wpEJl3WKOImARD9WgBsa
-          PG="psql -h 172.16.10.14 -p 6432 -U postgres"
           
           echo "=TACHYUS_TABLES="
-          $PG -d tachyus.com_db -c "\dt"
+          psql -h 172.16.10.14 -p 6432 -U postgres -d "tachyus.com_db" -c "\dt" 2>&1
           echo "=END="
           
-          echo "=TACHCORP_TABLES="
-          $PG -d tachcorp_db -c "\dt"
-          echo "=END_TC="
+          echo "=USER_TABLES_ALL="
+          # Find which DBs have a users table
+          for DB in tachyus.com_db tachcorp_db contract_db slb_db rockefeller_db conoco_db; do
+            TABLES=$(psql -h 172.16.10.14 -p 6432 -U postgres -d "$DB" -tc "SELECT tablename FROM pg_tables WHERE tablename ILIKE '%user%' AND schemaname='public';" 2>&1)
+            if [ -n "$(echo $TABLES | tr -d ' ')" ]; then
+              echo "DB $DB has user tables: $TABLES"
+            fi
+          done
+          echo "=END_UT="
           
-          echo "=CONTRACT_TABLES="
-          $PG -d contract_db -c "\dt"
-          echo "=END_CT="
+          echo "=CONTRACT_COMPANIES="
+          psql -h 172.16.10.14 -p 6432 -U postgres -d contract_db -c "SELECT * FROM companies LIMIT 10;" 2>&1
+          echo "=END_CC="
