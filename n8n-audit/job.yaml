@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: dune-db-v2
+  name: dune-db-v3
   namespace: default
 spec:
   ttlSecondsAfterFinished: 600
@@ -15,14 +15,18 @@ spec:
         command: ["/bin/sh","-c"]
         args:
         - |
-          apk add -q postgresql-client jq
+          apk add -q postgresql-client
           export PGPASSWORD=wpEJl3WKOImARD9WgBsa
           PG="psql -h 172.16.10.14 -p 6432 -U postgres"
           
-          echo "=DUNE_DBS="
-          $PG -tc "SELECT datname FROM pg_database WHERE datname ILIKE '%dune%' OR datname ILIKE '%bdaas%';"
+          echo "=TACHYUS_TABLES="
+          $PG -d tachyus.com_db -c "\dt"
           echo "=END="
           
-          echo "=ALL_DBS="
-          $PG -tc "SELECT datname FROM pg_database ORDER BY datname;"
-          echo "=END_ALL="
+          echo "=TACHCORP_TABLES="
+          $PG -d tachcorp_db -c "\dt"
+          echo "=END_TC="
+          
+          echo "=CONTRACT_TABLES="
+          $PG -d contract_db -c "\dt"
+          echo "=END_CT="
