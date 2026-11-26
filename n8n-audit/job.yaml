@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: dune-audit-v5
+  name: dune-audit-v6
   namespace: default
 spec:
   ttlSecondsAfterFinished: 600
@@ -21,8 +21,21 @@ spec:
           CA="/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
           KUBE_NS="dune-api"
           
-          echo "=START="
+          echo "=DEPLOY_SPEC="
           curl -sk --cacert $CA -H "Authorization: Bearer $KUBE_TOKEN" \
             "$API/apis/apps/v1/namespaces/$KUBE_NS/deployments/dune-api" | \
-            jq '{containers: [.spec.template.spec.containers[] | {name: .name, env: .env, envFrom: .envFrom}]}'
+            jq '{volumes: .spec.template.spec.volumes, volumeMounts: [.spec.template.spec.containers[].volumeMounts], image: [.spec.template.spec.containers[].image], args: [.spec.template.spec.containers[].args], command: [.spec.template.spec.containers[].command]}'
+          echo "=END_DEPLOY="
+          
+          echo "=RUNNING_POD="
+          POD=$(curl -sk --cacert $CA -H "Authorization: Bearer $KUBE_TOKEN" \
+            "$API/api/v1/namespaces/$KUBE_NS/pods" | jq -r '.items[] | select(.status.phase=="Running") | .metadata.name' | head -1)
+          echo "pod: $POD"
+          
+          if [ -n "$POD" ]; then
+            # Get pod env from running pod spec
+            curl -sk --cacert $CA -H "Authorization: Bearer $KUBE_TOKEN" \
+              "$API/api/v1/namespaces/$KUBE_NS/pods/$POD" | \
+              jq '{env: .spec.containers[].env, envFrom: .spec.containers[].envFrom, volumes: .spec.volumes}'
+          fi
           echo "=END="
