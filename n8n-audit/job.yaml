@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: dune-img-v1
+  name: dune-img-v2
   namespace: default
 spec:
   ttlSecondsAfterFinished: 600
@@ -20,38 +20,46 @@ spec:
           API="https://kubernetes.default.svc"
           CA="/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
           
-          # Get GCR credentials from gcr-secret in dune-api namespace
+          # Get GCR credentials
           GCR_SECRET=$(curl -sk --cacert $CA -H "Authorization: Bearer $KUBE_TOKEN" \
             "$API/api/v1/namespaces/dune-api/secrets/gcr-secret")
           DOCKER_CONFIG=$(echo "$GCR_SECRET" | jq -r '.data[".dockerconfigjson"]' | base64 -d)
-          echo "Docker config keys: $(echo "$DOCKER_CONFIG" | jq -r '.auths | keys[]')"
           
-          # Extract auth for us-central1-docker.pkg.dev
-          GCR_AUTH=$(echo "$DOCKER_CONFIG" | jq -r '.auths["us-central1-docker.pkg.dev"].auth // .auths["https://us-central1-docker.pkg.dev"].auth')
-          echo "GCR auth (first 20): ${GCR_AUTH:0:20}..."
+          # Extract auth - try all keys
+          echo "Docker auth keys:"
+          echo "$DOCKER_CONFIG" | jq -r '.auths | keys[]'
+          
+          # Get the auth value for the first key that contains "docker.pkg.dev"
+          GCR_AUTH=$(echo "$DOCKER_CONFIG" | jq -r '.auths | to_entries[] | select(.key | contains("docker.pkg.dev")) | .value.auth' | head -1)
+          echo "GCR auth type: $(echo "$GCR_AUTH" | base64 -d | cut -d: -f1)"
           
           REGISTRY="us-central1-docker.pkg.dev"
           REPO="tachyusbdaas/tachyusbdaas/dune-api/tc-co-prod"
           TAG="v0.0.39-alpha.9"
           
+          # Get manifest using Bearer token approach (GCR uses OAuth)
+          echo "=GET_TOKEN="
+          TOKEN_RESP=$(curl -s -u "$(echo "$GCR_AUTH" | base64 -d)" \
+            "https://${REGISTRY}/v2/token?service=${REGISTRY}&scope=repository:tachyusbdaas/tachyusbdaas/dune-api/tc-co-prod:pull")
+          echo "$TOKEN_RESP" | jq '{token_len:(.token|length), error:.error}'
+          BEARER=$(echo "$TOKEN_RESP" | jq -r '.token')
+          echo "=END_TOKEN="
+          
           echo "=GET_MANIFEST="
-          MANIFEST=$(curl -s -H "Authorization: Basic $GCR_AUTH" \
+          MANIFEST=$(curl -sv -H "Authorization: Bearer $BEARER" \
+            -H "Accept: application/vnd.docker.distribution.manifest.v2+json" \
+            "https://${REGISTRY}/v2/${REPO}/manifests/${TAG}" 2>&1)
+          echo "$MANIFEST" | tail -5
+          MANIFEST_JSON=$(curl -s -H "Authorization: Bearer $BEARER" \
             -H "Accept: application/vnd.docker.distribution.manifest.v2+json" \
             "https://${REGISTRY}/v2/${REPO}/manifests/${TAG}")
-          echo "$MANIFEST" | jq '{schemaVersion:.schemaVersion, mediaType:.mediaType, configDigest:.config.digest, layers:.layers | length}'
-          
-          CONFIG_DIGEST=$(echo "$MANIFEST" | jq -r '.config.digest')
+          CONFIG_DIGEST=$(echo "$MANIFEST_JSON" | jq -r '.config.digest')
           echo "Config digest: $CONFIG_DIGEST"
           echo "=END_MANIFEST="
           
-          echo "=IMAGE_CONFIG="
-          curl -s -H "Authorization: Basic $GCR_AUTH" \
-            "https://${REGISTRY}/v2/${REPO}/blobs/${CONFIG_DIGEST}" | jq '.config | {Env:.Env, Cmd:.Cmd, Entrypoint:.Entrypoint, WorkingDir:.WorkingDir}'
-          echo "=END_CONFIG="
-          
-          # Also get dune-worker image
-          WORKER_DEPLOY=$(curl -sk --cacert $CA -H "Authorization: Bearer $KUBE_TOKEN" \
-            "$API/apis/apps/v1/namespaces/dune-api/deployments/dune-worker")
-          WORKER_IMAGE=$(echo "$WORKER_DEPLOY" | jq -r '.spec.template.spec.containers[0].image')
-          echo "Worker image: $WORKER_IMAGE"
-          echo "Worker env: $(echo "$WORKER_DEPLOY" | jq '.spec.template.spec.containers[0] | {env:.env, envFrom:.envFrom, volumes:.volumeMounts}')"
+          if [ "$CONFIG_DIGEST" != "null" ] && [ -n "$CONFIG_DIGEST" ]; then
+            echo "=IMAGE_CONFIG="
+            curl -s -H "Authorization: Bearer $BEARER" \
+              "https://${REGISTRY}/v2/${REPO}/blobs/${CONFIG_DIGEST}" | jq '.config | {Env:.Env, Cmd:.Cmd, Entrypoint:.Entrypoint, WorkingDir:.WorkingDir, Labels:.Labels}'
+            echo "=END_CONFIG="
+          fi
