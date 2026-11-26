@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dune-audit-result4
+  namespace: default
+data:
+  init: placeholder
