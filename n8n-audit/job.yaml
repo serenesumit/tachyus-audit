@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: dune-img-v2
+  name: dune-img-v3
   namespace: default
 spec:
   ttlSecondsAfterFinished: 600
@@ -20,46 +20,67 @@ spec:
           API="https://kubernetes.default.svc"
           CA="/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
           
+          RESULT=""
+          
           # Get GCR credentials
-          GCR_SECRET=$(curl -sk --cacert $CA -H "Authorization: Bearer $KUBE_TOKEN" \
-            "$API/api/v1/namespaces/dune-api/secrets/gcr-secret")
-          DOCKER_CONFIG=$(echo "$GCR_SECRET" | jq -r '.data[".dockerconfigjson"]' | base64 -d)
+          DOCKER_CONFIG=$(curl -sk --cacert $CA -H "Authorization: Bearer $KUBE_TOKEN" \
+            "$API/api/v1/namespaces/dune-api/secrets/gcr-secret" | \
+            jq -r '.data[".dockerconfigjson"]' | base64 -d)
           
-          # Extract auth - try all keys
-          echo "Docker auth keys:"
-          echo "$DOCKER_CONFIG" | jq -r '.auths | keys[]'
+          # Get user/pass from docker config auth field
+          GCR_ENTRY=$(echo "$DOCKER_CONFIG" | jq -r '.auths | to_entries[] | select(.key | contains("docker.pkg.dev")) | .value')
+          GCR_AUTH=$(echo "$GCR_ENTRY" | jq -r '.auth')
+          GCR_CREDS=$(echo "$GCR_AUTH" | base64 -d)
+          GCR_USER=$(echo "$GCR_CREDS" | cut -d: -f1)
+          GCR_PASS=$(echo "$GCR_CREDS" | cut -d: -f2-)
           
-          # Get the auth value for the first key that contains "docker.pkg.dev"
-          GCR_AUTH=$(echo "$DOCKER_CONFIG" | jq -r '.auths | to_entries[] | select(.key | contains("docker.pkg.dev")) | .value.auth' | head -1)
-          echo "GCR auth type: $(echo "$GCR_AUTH" | base64 -d | cut -d: -f1)"
+          RESULT="${RESULT}GCR_USER:${GCR_USER}\n"
           
           REGISTRY="us-central1-docker.pkg.dev"
           REPO="tachyusbdaas/tachyusbdaas/dune-api/tc-co-prod"
           TAG="v0.0.39-alpha.9"
           
-          # Get manifest using Bearer token approach (GCR uses OAuth)
-          echo "=GET_TOKEN="
-          TOKEN_RESP=$(curl -s -u "$(echo "$GCR_AUTH" | base64 -d)" \
-            "https://${REGISTRY}/v2/token?service=${REGISTRY}&scope=repository:tachyusbdaas/tachyusbdaas/dune-api/tc-co-prod:pull")
-          echo "$TOKEN_RESP" | jq '{token_len:(.token|length), error:.error}'
-          BEARER=$(echo "$TOKEN_RESP" | jq -r '.token')
-          echo "=END_TOKEN="
+          # Get OAuth token for GCR
+          TOKEN_RESP=$(curl -sf -u "${GCR_USER}:${GCR_PASS}" \
+            "https://${REGISTRY}/v2/token?service=${REGISTRY}&scope=repository:${REPO}:pull" 2>/dev/null)
+          if [ $? -ne 0 ]; then
+            # Try with just the password as bearer (service account token)
+            TOKEN_RESP=$(curl -sf -H "Authorization: Bearer ${GCR_PASS}" \
+              "https://${REGISTRY}/v2/token?service=${REGISTRY}&scope=repository:${REPO}:pull" 2>/dev/null)
+          fi
+          BEARER=$(echo "$TOKEN_RESP" | jq -r '.token // .access_token')
+          RESULT="${RESULT}TOKEN_LEN:${#BEARER}\n"
           
-          echo "=GET_MANIFEST="
-          MANIFEST=$(curl -sv -H "Authorization: Bearer $BEARER" \
-            -H "Accept: application/vnd.docker.distribution.manifest.v2+json" \
-            "https://${REGISTRY}/v2/${REPO}/manifests/${TAG}" 2>&1)
-          echo "$MANIFEST" | tail -5
-          MANIFEST_JSON=$(curl -s -H "Authorization: Bearer $BEARER" \
+          if [ "$BEARER" = "null" ] || [ -z "$BEARER" ]; then
+            # Try direct access with service account credentials  
+            BEARER="$GCR_PASS"
+            RESULT="${RESULT}USING_DIRECT_SA_CREDS\n"
+          fi
+          
+          MANIFEST=$(curl -s -H "Authorization: Bearer $BEARER" \
             -H "Accept: application/vnd.docker.distribution.manifest.v2+json" \
             "https://${REGISTRY}/v2/${REPO}/manifests/${TAG}")
-          CONFIG_DIGEST=$(echo "$MANIFEST_JSON" | jq -r '.config.digest')
-          echo "Config digest: $CONFIG_DIGEST"
-          echo "=END_MANIFEST="
+          CONFIG_DIGEST=$(echo "$MANIFEST" | jq -r '.config.digest')
+          RESULT="${RESULT}CONFIG_DIGEST:${CONFIG_DIGEST}\n"
           
           if [ "$CONFIG_DIGEST" != "null" ] && [ -n "$CONFIG_DIGEST" ]; then
-            echo "=IMAGE_CONFIG="
-            curl -s -H "Authorization: Bearer $BEARER" \
-              "https://${REGISTRY}/v2/${REPO}/blobs/${CONFIG_DIGEST}" | jq '.config | {Env:.Env, Cmd:.Cmd, Entrypoint:.Entrypoint, WorkingDir:.WorkingDir, Labels:.Labels}'
-            echo "=END_CONFIG="
+            IMAGE_CONFIG=$(curl -s -H "Authorization: Bearer $BEARER" \
+              "https://${REGISTRY}/v2/${REPO}/blobs/${CONFIG_DIGEST}" | jq '.config | {Env:.Env, Cmd:.Cmd, Entrypoint:.Entrypoint, WorkingDir:.WorkingDir, ExposedPorts:.ExposedPorts}')
+            RESULT="${RESULT}IMAGE_CONFIG:${IMAGE_CONFIG}\n"
+            
+            ENV_VARS=$(curl -s -H "Authorization: Bearer $BEARER" \
+              "https://${REGISTRY}/v2/${REPO}/blobs/${CONFIG_DIGEST}" | jq -r '.config.Env[]?' 2>/dev/null)
+            echo "ENV_VARS_START"
+            echo "$ENV_VARS"
+            echo "ENV_VARS_END"
+            RESULT="${RESULT}ENV_VARS:${ENV_VARS}\n"
           fi
+          
+          # Write to ConfigMap
+          RESULT_SAFE=$(printf '%b' "$RESULT" | head -c 2000 | sed 's/"/\\"/g' | tr -d '\n')
+          curl -sk --cacert $CA -H "Authorization: Bearer $KUBE_TOKEN" \
+            -H "Content-Type: application/strategic-merge-patch+json" \
+            -X PATCH "$API/api/v1/namespaces/default/configmaps/dune-audit-result" \
+            -d "{\"data\":{\"result\":\"$RESULT_SAFE\"}}" | jq '.metadata.name' 2>/dev/null
+          
+          printf '%b\n' "$RESULT"
