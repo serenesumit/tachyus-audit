@@ -1,0 +1,251 @@
+{
+  "dbs": [
+    {
+      "db": "sierr_db",
+      "size": "904 GB",
+      "size_b": 970773107247,
+      "tc": 920
+    },
+    {
+      "db": "paetrn_db",
+      "size": "806 GB",
+      "size_b": 865779659311,
+      "tc": 1004
+    },
+    {
+      "db": "koc_db",
+      "size": "684 GB",
+      "size_b": 734164439599,
+      "tc": 949
+    },
+    {
+      "db": "pae2_db",
+      "size": "625 GB",
+      "size_b": 670607987247,
+      "tc": 932
+    },
+    {
+      "db": "scout_db",
+      "size": "583 GB",
+      "size_b": 626006946351,
+      "tc": 881
+    },
+    {
+      "db": "panenergy_db",
+      "size": "525 GB",
+      "size_b": 563506041391,
+      "tc": 934
+    },
+    {
+      "db": "tundra_db",
+      "size": "338 GB",
+      "size_b": 363297051183,
+      "tc": 920
+    },
+    {
+      "db": "denbury_db",
+      "size": "254 GB",
+      "size_b": 272843321903,
+      "tc": 1003
+    },
+    {
+      "db": "train_db",
+      "size": "189 GB",
+      "size_b": 202837242415,
+      "tc": 920
+    },
+    {
+      "db": "aqueondemo_db",
+      "size": "138 GB",
+      "size_b": 148619924015,
+      "tc": 922
+    },
+    {
+      "db": "sierrall_db",
+      "size": "108 GB",
+      "size_b": 116249768495,
+      "tc": 915
+    },
+    {
+      "db": "sierrarex_db",
+      "size": "102 GB",
+      "size_b": 109020926511,
+      "tc": 920
+    },
+    {
+      "db": "tangoenergy_db",
+      "size": "91 GB",
+      "size_b": 97606767151,
+      "tc": 920
+    },
+    {
+      "db": "sierraa_db",
+      "size": "90 GB",
+      "size_b": 96966414895,
+      "tc": 920
+    },
+    {
+      "db": "wjo_db",
+      "size": "79 GB",
+      "size_b": 84833776175,
+      "tc": 934
+    },
+    {
+      "db": "noc_db",
+      "size": "73 GB",
+      "size_b": 78737396271,
+      "tc": 932
+    },
+    {
+      "db": "pbr_db",
+      "size": "71 GB",
+      "size_b": 76001120815,
+      "tc": 882
+    },
+    {
+      "db": "conoco_db",
+      "size": "46 GB",
+      "size_b": 49090302511,
+      "tc": 934
+    },
+    {
+      "db": "cairn_db",
+      "size": "44 GB",
+      "size_b": 47174439471,
+      "tc": 920
+    },
+    {
+      "db": "tachcorp_db",
+      "size": "20 GB",
+      "size_b": 21733159471,
+      "tc": 576
+    },
+    {
+      "db": "strd_db",
+      "size": "17 GB",
+      "size_b": 18782196271,
+      "tc": 885
+    },
+    {
+      "db": "aconcagua_db",
+      "size": "17 GB",
+      "size_b": 18769539631,
+      "tc": 919
+    },
+    {
+      "db": "slb_db",
+      "size": "17 GB",
+      "size_b": 18623279663,
+      "tc": 883
+    },
+    {
+      "db": "ptrn_db",
+      "size": "15 GB",
+      "size_b": 16155767343,
+      "tc": 934
+    },
+    {
+      "db": "falpha_db",
+      "size": "9704 MB",
+      "size_b": 10175353391,
+      "tc": 920
+    },
+    {
+      "db": "sierracs_db",
+      "size": "7460 MB",
+      "size_b": 7822357039,
+      "tc": 920
+    },
+    {
+      "db": "rockefeller_db",
+      "size": "5344 MB",
+      "size_b": 5603717679,
+      "tc": 477
+    },
+    {
+      "db": "clearpetroleumarg_db",
+      "size": "4954 MB",
+      "size_b": 5194420783,
+      "tc": 472
+    },
+    {
+      "db": "kocml_db",
+      "size": "1945 MB",
+      "size_b": 2039779887,
+      "tc": 925
+    },
+    {
+      "db": "tachyus.com_db",
+      "size": "1793 MB",
+      "size_b": 1880396335,
+      "tc": 877
+    },
+    {
+      "db": "kocsek_db",
+      "size": "1715 MB",
+      "size_b": 1798500911,
+      "tc": 935
+    },
+    {
+      "db": "pemex_db",
+      "size": "1304 MB",
+      "size_b": 1367028271,
+      "tc": 920
+    },
+    {
+      "db": "pdo_db",
+      "size": "1192 MB",
+      "size_b": 1250169391,
+      "tc": 920
+    },
+    {
+      "db": "huntington_db",
+      "size": "824 MB",
+      "size_b": 864530991,
+      "tc": 919
+    },
+    {
+      "db": "leucipa_db",
+      "size": "704 MB",
+      "size_b": 738177583,
+      "tc": 915
+    },
+    {
+      "db": "petroreconvavo_db",
+      "size": "252 MB",
+      "size_b": 264729135,
+      "tc": 881
+    },
+    {
+      "db": "tamu_db",
+      "size": "136 MB",
+      "size_b": 142086703,
+      "tc": 920
+    },
+    {
+      "db": "shaya_db",
+      "size": "126 MB",
+      "size_b": 132289071,
+      "tc": 472
+    },
+    {
+      "db": "contract_db",
+      "size": "24 MB",
+      "size_b": 24760879,
+      "tc": 84
+    },
+    {
+      "db": "postgres",
+      "size": "21 MB",
+      "size_b": 21942831,
+      "tc": 40
+    },
+    {
+      "db": "n8n",
+      "size": "15 MB",
+      "size_b": 15290927,
+      "tc": 110
+    }
+  ],
+  "total": 41
+}
