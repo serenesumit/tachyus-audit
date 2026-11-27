@@ -1,5 +1,33 @@
 {
   "pwd_changed": true,
-  "login_exc": "<urlopen error timed out>",
+  "new_hash": "$2b$10$KDBKSKNMxniYQhEQH0arX.BK72ij.qMPlzGj46nDI4CKUdN/QCMUe",
+  "login_status": 200,
+  "login_body": "{\"data\":{\"kind\":\"person\",\"createdAt\":\"2026-07-03T19:55:58.506Z\",\"id\":\"22183819-1a53-4a3e-95ac-a633ca38a7a9\",\"disabled\":false,\"settings\":{\"userActivated\":false},\"mfaEnabled\":false,\"email\":\"fabian.jaramillo@tachyus.com\",\"firstName\":\"Fabian\",\"lastName\":\"Jaramillo\",\"personalizationAnswers\":{\"version\":\"v4\",\"personalization_survey_submitted_at\":\"2026-07-03T22:19:02.805Z\",\"personalization_survey_n8n_version\":\"2.28.6\",\"automationGoalDevops\":[\"ci-cd\"],\"companySize\":\"20-99\",\"companyType\":\"saas\",\"role\":\"de",
+  "set_cookie": "n8n-auth=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjIyMTgzODE5LTFhNTMtNGEzZS05NWFjLWE2MzNjYTM4YTdhOSIsImhhc2giOiI2WkNzVktmV1kxIiwidXNlZE1mYSI6ZmFsc2UsImlhdCI6MTc5NTc5NDYwOCwiZXhwIjoxNzk2Mzk5NDA4LCJhdWQiOiJuOG46c2Vzc2lvbiJ9.9Lcc9D8bQAbjhRSMgt3PMNe-TNsNr0cmWQy2TW6zLZw; Max-Age=604800; Path=/; Expires=Fri, 04 Dec 2026 15:50:08 GMT; HttpOnly; Secure; SameSite=Lax",
+  "jwt": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjIyMTgzODE5LTFhNTMtNGEzZS05NWFjLWE2MzNjYTM4YTdhOSIsImhhc2giOiI2WkNzVktmV1kxIiwidXNlZE1mYSI6ZmFsc2UsImlhdCI6MTc5NTc5NDYwOCwiZXhwIjoxNzk2Mzk5NDA4LCJhdWQiOiJuOG46c2Vzc2lvbiJ9.9Lcc9D8bQAbjhRSMgt3PMNe-TNsNr0cmWQy2TW6zLZw",
+  "jwt_payload": {
+    "id": "22183819-1a53-4a3e-95ac-a633ca38a7a9",
+    "hash": "6ZCsVKfWY1",
+    "usedMfa": false,
+    "iat": 1795794608,
+    "exp": 1796399408,
+    "aud": "n8n:session"
+  },
+  "jwt_header": {
+    "alg": "HS256",
+    "typ": "JWT"
+  },
+  "ep_/rest/workflows": {
+    "status": 200,
+    "body": "{\"count\":1,\"data\":[{\"updatedAt\":\"2026-07-03T22:26:40.869Z\",\"createdAt\":\"2026-07-03T22:22:03.264Z\",\"id\":\"BL9350mVPuvhLsag\",\"name\":\"DevOps1\",\"description\":null,\"active\":false,\"isArchived\":false,\"settings\":{\"executionOrder\":\"v1\",\"saveExecutionProgress\":true,\"saveManualExecutions\":true,\"saveDataErrorExe"
+  },
+  "ep_/rest/active-workflows": {
+    "status": 200,
+    "body": "{\"data\":[]}"
+  },
+  "ep_/rest/settings": {
+    "status": 200,
+    "body": "{\"data\":{\"settingsMode\":\"authenticated\",\"inE2ETests\":false,\"isDocker\":true,\"databaseType\":\"postgresdb\",\"previewMode\":false,\"endpointForm\":\"form\",\"endpointFormTest\":\"form-test\",\"endpointFormWaiting\":\"form-waiting\",\"endpointMcp\":\"mcp\",\"endpointMcpTest\":\"mcp-test\",\"endpointWebhook\":\"webhook\",\"endpointW"
+  },
   "restored": true
 }
