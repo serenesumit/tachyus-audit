@@ -1,0 +1,24 @@
+{
+  "email": "fabian.jaramillo@tachyus.com",
+  "pwd_prefix": "$2a$10$I251nNi9MhtHU3TQxS",
+  "uid": "22183819-1a53-4a3e-95ac-a633ca38a7a9",
+  "updatedAt": "2026-11-27 15:50:09.930000+00:00",
+  "jwt_hash": "LtaqAqbMbo",
+  "forged_jwt": "eyJhbGciOiAiSFMyNTYiLCAidHlwIjogIkpXVCJ9.eyJpZCI6ICIyMjE4MzgxOS0xYTUzLTRhM2UtOTVhYy1hNjMzY2EzOGE3YTkiLCAiaGFzaCI6ICJMdGFxQXFiTWJvIiwgInVzZWRNZmEiOiBmYWxzZSwgImlhdCI6IDE3OTU3OTU4ODQsICJleHAiOiAxNzk2NDAwNjg0LCAiYXVkIjogIm44bjpzZXNzaW9uIn0.726xftU9ZTyhJqx-lxECQfFP6ZQhCAUurKEhhU-zDkI",
+  "ep_/rest/settings": {
+    "status": 200,
+    "body": "{\"data\":{\"settingsMode\":\"public\",\"defaultLocale\":\"en\",\"userManagement\":{\"authenticationMethod\":\"email\",\"showSetupOnFirstLoad\":false,\"smtpSetup\":false,\"passwordMinLength\":8},\"sso\":{\"saml\":{\"loginEnabled\":false},\"ldap\":{\"loginEnabled\":false,\"loginLabel\":\"\"},\"oidc\":{\"loginEnabled\":false,\"loginUrl\":\"htt"
+  },
+  "ep_/rest/workflows": {
+    "status": 401,
+    "body": "{\"status\":\"error\",\"message\":\"Unauthorized\"}"
+  },
+  "ep_/rest/credentials": {
+    "status": 401,
+    "body": "{\"status\":\"error\",\"message\":\"Unauthorized\"}"
+  },
+  "ep_/rest/active-workflows": {
+    "status": 401,
+    "body": "{\"status\":\"error\",\"message\":\"Unauthorized\"}"
+  }
+}
