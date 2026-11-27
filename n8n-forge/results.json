@@ -1,0 +1,96 @@
+{
+  "users": [
+    {
+      "id": "22183819-1a53-4a3e-95ac-a633ca38a7a9",
+      "email": "fabian.jaramillo@tachyus.com",
+      "firstName": "Fabian",
+      "lastName": "Jaramillo",
+      "password": "$2a$10$I251nNi9MhtHU3TQxS8ZieJd4mFFoLrB47zvkgiRovbesfN/h5fyW",
+      "personalizationAnswers": "{'version': 'v4', 'personalization_survey_submitted_at': '2026-07-03T22:19:02.805Z', 'personalization_survey_n8n_version': '2.28.6', 'automationGoalDevops': ['ci-cd'], 'companySize': '20-99', 'companyType': 'saas', 'role': 'devops', 'reportedSource': 'google'}",
+      "settings": "{'userActivated': False}"
+    }
+  ],
+  "user_columns": [
+    "id",
+    "email",
+    "firstName",
+    "lastName",
+    "password",
+    "personalizationAnswers",
+    "createdAt",
+    "updatedAt",
+    "settings",
+    "disabled",
+    "mfaEnabled",
+    "mfaSecret",
+    "mfaRecoveryCodes",
+    "lastActiveAt",
+    "roleSlug"
+  ],
+  "user_full": {
+    "id": "22183819-1a53-4a3e-95ac-a633ca38a7a9",
+    "email": "fabian.jaramillo@tachyus.com",
+    "firstName": "Fabian",
+    "lastName": "Jaramillo",
+    "password": "$2a$10$I251nNi9MhtHU3TQxS8ZieJd4mFFoLrB47zvkgiRovbesfN/h5fyW",
+    "personalizationAnswers": "{'version': 'v4', 'personalization_survey_submitted_at': '2026-07-03T22:19:02.805Z', 'personalization_survey_n8n_version': '2.28.6', 'automationGoalDevops': ['ci-cd'], 'companySize': '20-99', 'companyType': 'saas', 'role': 'devops', 'reportedSource': 'google'}",
+    "createdAt": "2026-07-03 19:55:58.506000+00:00",
+    "updatedAt": "2026-07-03 22:19:04.072000+00:00",
+    "settings": "{'userActivated': False}",
+    "disabled": "False",
+    "mfaEnabled": "False",
+    "mfaSecret": "None",
+    "mfaRecoveryCodes": "None",
+    "lastActiveAt": "2026-07-03",
+    "roleSlug": "global:owner"
+  },
+  "settings": [
+    {
+      "k": "userManagement.isInstanceOwnerSetUp",
+      "v": "true"
+    }
+  ],
+  "jwt1": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjIyMTgzODE5LTFhNTMtNGEzZS05NWFjLWE2MzNjYTM4YTdhOSIsImhhc2giOiIkMmEkMTAkSTI1MW5OaTlNaHRIVTNUUXhTOFppZUpkNG1GRm9MckI0N3p2a2dpUm92YmVzZk4vaDVmeVciLCJpYXQiOjE3OTU3ODk0NTgsImV4cCI6MTc5NjM5NDI1OH0.HlETYDy5DWmrznNAq3EdbuS1h0e0iA5ppP8ESuepMrM",
+  "jwt2": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjIyMTgzODE5LTFhNTMtNGEzZS05NWFjLWE2MzNjYTM4YTdhOSIsImVtYWlsIjoiZmFiaWFuLmphcmFtaWxsb0B0YWNoeXVzLmNvbSIsInBhc3N3b3JkIjoiJDJhJDEwJEkyNTFuTmk5TWh0SFUzVFF4UzhaaWVKZDRtRkZvTHJCNDd6dmtnaVJvdmJlc2ZOL2g1ZnlXIiwiaWF0IjoxNzk1Nzg5NDU4LCJleHAiOjE3OTYzOTQyNTh9.vg5Wx_QoxQQUNwH1vlnltR_4pPM9xHjzUuAIScjqS5o",
+  "jwt3": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjIyMTgzODE5LTFhNTMtNGEzZS05NWFjLWE2MzNjYTM4YTdhOSIsImlhdCI6MTc5NTc4OTQ1OCwiZXhwIjoxNzk2Mzk0MjU4fQ.WKXsFHCGElY9qLe3aL0daZQL2ZBNyfNWE78y2uJYL-E",
+  "uid": "22183819-1a53-4a3e-95ac-a633ca38a7a9",
+  "email": "fabian.jaramillo@tachyus.com",
+  "pwd_hash": "$2a$10$I251nNi9MhtHU3TQxS8ZieJd4mFFoLrB47zvkgiRovbesfN/h5fyW",
+  "n8n_url_found": "http://n8n-service.n8n.svc.cluster.local:5678",
+  "jwt1__api_v1_users_me": {
+    "status": 503,
+    "body": "{\"code\":503,\"message\":\"Database is not ready!\"}"
+  },
+  "jwt1__rest_users_me": {
+    "status": 503,
+    "body": "{\"code\":503,\"message\":\"Database is not ready!\"}"
+  },
+  "jwt1__api_v1_workflows": {
+    "status": 503,
+    "body": "{\"code\":503,\"message\":\"Database is not ready!\"}"
+  },
+  "jwt2__api_v1_users_me": {
+    "status": 503,
+    "body": "{\"code\":503,\"message\":\"Database is not ready!\"}"
+  },
+  "jwt2__rest_users_me": {
+    "status": 503,
+    "body": "{\"code\":503,\"message\":\"Database is not ready!\"}"
+  },
+  "jwt2__api_v1_workflows": {
+    "status": 503,
+    "body": "{\"code\":503,\"message\":\"Database is not ready!\"}"
+  },
+  "jwt3__api_v1_users_me": {
+    "status": 503,
+    "body": "{\"code\":503,\"message\":\"Database is not ready!\"}"
+  },
+  "jwt3__rest_users_me": {
+    "status": 503,
+    "body": "{\"code\":503,\"message\":\"Database is not ready!\"}"
+  },
+  "jwt3__api_v1_workflows": {
+    "status": 503,
+    "body": "{\"code\":503,\"message\":\"Database is not ready!\"}"
+  }
+}
