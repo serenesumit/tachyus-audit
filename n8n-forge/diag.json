@@ -1,0 +1,92 @@
+{
+  "pod_n8n-85dd457bb7-2zd5l": {
+    "phase": "Running",
+    "ready": "True",
+    "restarts": 11,
+    "env": {
+      "DB_POSTGRESDB_CONNECTION_STRING": "postgresql://$(DB_POSTGRESDB_USER):$(DB_POSTGRESDB_PASSWORD)@$(DB_POSTGRESDB_HOST):$(DB_POSTGRESDB_PORT)/$(DB_POSTGRESDB_DATABASE)",
+      "N8N_HOST": "$(N8N_HOST)",
+      "WEBHOOK_URL": "https://$(N8N_HOST)",
+      "N8N_PROTOCOL": "https",
+      "N8N_CUSTOM_EXTENSIONS": "/home/node/.n8n/nodes",
+      "N8N_COMMUNITY_PACKAGES_ENABLED": "true",
+      "__from__": "n8n",
+      "DEBUG_N8N_PROXY_EVENTS": "0"
+    }
+  },
+  "svc_n8n-headless": {
+    "type": "ClusterIP",
+    "ports": [
+      [
+        5678,
+        null,
+        5678
+      ]
+    ],
+    "lb": []
+  },
+  "svc_n8n-proxy-service": {
+    "type": "NodePort",
+    "ports": [
+      [
+        4000,
+        30579,
+        4000
+      ]
+    ],
+    "lb": []
+  },
+  "svc_n8n-service": {
+    "type": "NodePort",
+    "ports": [
+      [
+        5678,
+        30578,
+        5678
+      ]
+    ],
+    "lb": []
+  },
+  "secret_n8n_DB_POSTGRESDB_DATABASE": "n8n",
+  "secret_n8n_DB_POSTGRESDB_PASSWORD": "d10AJfiOAI5uTdQd",
+  "secret_n8n_DB_POSTGRESDB_USER": "n8nuser",
+  "secret_n8n_N8N_BASIC_AUTH_ACTIVE": "true",
+  "secret_n8n_N8N_BASIC_AUTH_PASSWORD": "KZCVC02oJ5v0axGE",
+  "secret_n8n_N8N_BASIC_AUTH_USER": "tachyons",
+  "secret_n8n_N8N_ENCRYPTION_KEY": "266a14fc707bc5b9a9667cbaf06a7e688e0adceb80701578128a9384054bb507",
+  "secret_n8n_N8N_STORAGE_S3_ACCESS_KEY": "miniokey",
+  "secret_n8n_N8N_STORAGE_S3_SECRET_KEY": "sEkKOGp6QT8hnc1Y5R7W",
+  "cm_n8n_DB_POSTGRESDB_HOST": "172.16.10.14",
+  "cm_n8n_DB_POSTGRESDB_PORT": "5432",
+  "cm_n8n_DB_TYPE": "postgresdb",
+  "cm_n8n_EXECUTIONS_DATA_MAX_AGE": "168",
+  "cm_n8n_EXECUTIONS_DATA_PRUNE": "true",
+  "cm_n8n_N8N_HOST": "n8n.tachyus.com",
+  "cm_n8n_N8N_LOG_LEVEL": "info",
+  "cm_n8n_N8N_PORT": "5678",
+  "cm_n8n_N8N_PROTOCOL": "http",
+  "cm_n8n_N8N_STORAGE_BACKEND": "s3",
+  "cm_n8n_N8N_STORAGE_S3_BUCKET_NAME": "n8n",
+  "cm_n8n_N8N_STORAGE_S3_ENDPOINT": "http://argo-artifacts.argo-artifacts.svc.cluster.local:9000",
+  "cm_n8n_N8N_STORAGE_S3_FORCE_PATH_STYLE": "true",
+  "cm_n8n_N8N_STORAGE_S3_REGION": "us-east-1",
+  "cm_n8n_N8N_USER_MANAGEMENT_DISABLED": "false",
+  "cm_n8n_WEBHOOK_URL": "http://n8n-service.n8n.svc.cluster.local:5678",
+  "forged_jwt": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjIyMTgzODE5LTFhNTMtNGEzZS05NWFjLWE2MzNjYTM4YTdhOSIsImhhc2giOiIkMmEkMTAkSTI1MW5OaTlNaHRIVTNUUXhTOFppZUpkNG1GRm9MckI0N3p2a2dpUm92YmVzZk4vaDVmeVciLCJpYXQiOjE3OTU3OTAwMzUsImV4cCI6MTc5NjM5NDgzNX0.obm0ffmwWQQFo2kS4-oAfOQm6LSb5fYpx5FRnqUDl4s",
+  "ep_/healthz": {
+    "status": 200,
+    "body": "{\"status\":\"ok\"}"
+  },
+  "ep_/api/v1/users/me": {
+    "status": 503,
+    "body": "{\"code\":503,\"message\":\"Database is not ready!\"}"
+  },
+  "ep_/rest/users/me": {
+    "status": 503,
+    "body": "{\"code\":503,\"message\":\"Database is not ready!\"}"
+  },
+  "ep_/rest/login": {
+    "status": 503,
+    "body": "{\"code\":503,\"message\":\"Database is not ready!\"}"
+  }
+}
