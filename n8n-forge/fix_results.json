@@ -1,0 +1,109 @@
+{
+  "db_6432_postgres": "OK",
+  "db_5432_postgres": "OK",
+  "db_5432_n8nuser": "OK",
+  "n8n_roles": [
+    [
+      "n8nuser",
+      true,
+      true
+    ]
+  ],
+  "all_roles": [
+    [
+      "bdaas-dev-centralus1-gke",
+      false
+    ],
+    [
+      "customersuccess",
+      false
+    ],
+    [
+      "datacore_user",
+      true
+    ],
+    [
+      "duneuser",
+      true
+    ],
+    [
+      "engineering",
+      false
+    ],
+    [
+      "n8nuser",
+      true
+    ],
+    [
+      "pg_execute_server_program",
+      false
+    ],
+    [
+      "pg_monitor",
+      false
+    ],
+    [
+      "pg_read_all_settings",
+      false
+    ],
+    [
+      "pg_read_all_stats",
+      false
+    ],
+    [
+      "pg_read_server_files",
+      false
+    ],
+    [
+      "pg_signal_backend",
+      false
+    ],
+    [
+      "pg_stat_scan_tables",
+      false
+    ],
+    [
+      "pg_write_server_files",
+      false
+    ],
+    [
+      "postgres",
+      true
+    ],
+    [
+      "queryuser",
+      true
+    ],
+    [
+      "readonly",
+      false
+    ]
+  ],
+  "pgbouncer_cm_postgres-connection-config": {
+    "PGHOST": "172.16.10.14",
+    "PGPORT": "6432",
+    "PGUSER": "postgres"
+  },
+  "port5432_direct": "PostgreSQL 13.22 (Ubuntu 13.22-1.pgdg22.04+1) on x86_64-pc-linux-gnu, compiled by gcc (Ubuntu 11.4.0-1ubuntu1~22.04) 11.4.0, 64-bit",
+  "n8nuser_on_5432": [
+    [
+      "n8nuser",
+      true
+    ]
+  ],
+  "n8nuser_password_reset": true,
+  "restarted_pod": "n8n-85dd457bb7-2zd5l",
+  "forged_jwt": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjIyMTgzODE5LTFhNTMtNGEzZS05NWFjLWE2MzNjYTM4YTdhOSIsImhhc2giOiIkMmEkMTAkSTI1MW5OaTlNaHRIVTNUUXhTOFppZUpkNG1GRm9MckI0N3p2a2dpUm92YmVzZk4vaDVmeVciLCJpYXQiOjE3OTU3OTA0MzUsImV4cCI6MTc5NjM5NTIzNX0.mUE15GcIZPUP8kSiezAEy876bZ0q1yCnLXgRALN8rQw",
+  "ep_/healthz": {
+    "error": "<urlopen error [Errno 111] Connection refused>"
+  },
+  "ep_/rest/settings": {
+    "error": "<urlopen error [Errno 111] Connection refused>"
+  },
+  "ep_/api/v1/users/me": {
+    "error": "<urlopen error [Errno 111] Connection refused>"
+  },
+  "ep_/rest/users/me": {
+    "error": "<urlopen error [Errno 111] Connection refused>"
+  }
+}
