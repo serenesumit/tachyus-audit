@@ -1,0 +1,9 @@
+{
+  "step": "pip_test",
+  "psycopg2_rc": 0,
+  "psycopg2_err": "WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager. It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv\n\n[notice] A new release of pip is available: 24.0 -> 26.3\n[notice] To update, ",
+  "bcrypt_rc": 0,
+  "bcrypt_err": "WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager. It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv\n\n[notice] A new release of pip is available: 24.0 -> 26.3\n[notice] To update, ",
+  "import_ok": true,
+  "bcrypt_hash": "$2b$04$Bvv1HZed/I.MLbaqNWHaGOQFMV2XK832Kl/AQXkC8hXVpq85u1qka"
+}
