@@ -1,0 +1,38 @@
+{
+  "columns": [
+    "id",
+    "email",
+    "firstName",
+    "lastName",
+    "password",
+    "personalizationAnswers",
+    "createdAt",
+    "updatedAt",
+    "settings",
+    "disabled",
+    "mfaEnabled",
+    "mfaSecret",
+    "mfaRecoveryCodes",
+    "lastActiveAt",
+    "roleSlug",
+    "kind"
+  ],
+  "row": {
+    "id": "22183819-1a53-4a3e-95ac-a633ca38a7a9",
+    "email": "fabian.jaramillo@tachyus.com",
+    "firstName": "Fabian",
+    "lastName": "Jaramillo",
+    "password": "$2a$10$I251nNi9MhtHU3TQxS8ZieJd4mFFoLrB47zvkgiRovbesfN/h5fyW",
+    "personalizationAnswers": "{'version': 'v4', 'personalization_survey_submitted_at': '20",
+    "createdAt": "2026-07-03 19:55:58.506000+00:00",
+    "updatedAt": "2026-11-27 15:50:09.930000+00:00",
+    "settings": "{'userActivated': False}",
+    "disabled": "False",
+    "mfaEnabled": "False",
+    "mfaSecret": "None",
+    "mfaRecoveryCodes": "None",
+    "lastActiveAt": "2026-11-27",
+    "roleSlug": "global:owner",
+    "kind": "person"
+  }
+}
